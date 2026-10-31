@@ -1,0 +1,23 @@
+version = 1
+
+[picker]
+width = "85%"
+height = "75%"
+hide_local = ["popup-*"]
+
+[discovery]
+cache_seconds = 30
+refresh_seconds = 15
+connect_timeout_seconds = 3
+command_timeout_seconds = 5
+concurrency = 4
+
+[[hosts]]
+id = "omni"
+label = "Omni"
+ssh = "home.omni"
+tmux_path = "/usr/bin/tmux"
+remote_prefix = "auto"
+
+# Add another [[hosts]] entry only for SSH aliases you want queried.
+# socket_name = "other-server" and socket_path = "/absolute/socket" are exclusive.
