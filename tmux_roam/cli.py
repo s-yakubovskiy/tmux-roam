@@ -1,7 +1,6 @@
 import argparse
 import json
 import os
-import shlex
 import shutil
 import signal
 import subprocess
@@ -47,6 +46,8 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("pick")
     p.add_argument("--client")
+    p.add_argument("--search", action="store_true")
+    p.add_argument("--pane")
     p = sub.add_parser("native", help="open the native tmux session tree with remote entries")
     p.add_argument("--client")
     p = sub.add_parser("native-select", help=argparse.SUPPRESS)
@@ -59,6 +60,8 @@ def main(argv=None):
     p.add_argument("--pane", required=True)
     p = sub.add_parser("popup", help=argparse.SUPPRESS)
     p.add_argument("--client", required=True)
+    p.add_argument("--search", action="store_true")
+    p.add_argument("--pane")
     p = sub.add_parser("picker-state", help=argparse.SUPPRESS)
     p.add_argument("directory")
     p.add_argument("action", choices=["filter", "hidden", "refresh"])
@@ -175,9 +178,29 @@ def main(argv=None):
             native.select(config, args.client, args.target, args.navigation)
         elif args.command == "native-refresh":
             native.refresh(config, args.client, args.pane, args.navigation)
-        elif args.command == "pick":
+        elif args.command in ("pick", "popup"):
             client = _client(args.client)
-            token = picker.begin_navigation(client)
+            origin = args.pane or native._client_pane(client)
+            if args.search and native._client_pane(client) != origin:
+                return 0
+            popup = None
+            if args.command == "popup":
+                rows = tmux.run(["list-clients", "-F", "#{client_name}|#{client_width}|#{client_height}|#{pane_width}|#{pane_height}"]).stdout.splitlines()
+                dimensions = next((line.rsplit("|", 4) for line in rows if line.startswith(client + "|")), None)
+                if not dimensions:
+                    raise RuntimeError("cannot open tmux popup: invoking client disappeared")
+                popup = tuple(map(int, dimensions[3:] if args.search else dimensions[1:3]))
+                if popup[0] < 45 or popup[1] < 14:
+                    tmux.run(["display-message", "-c", client, "tmux-roam: terminal too small; opening native picker"])
+                    tmux.run(["choose-tree", "-Zs", "-t", origin])
+                    return 0
+            tree_token = ""
+            if args.search and tmux.run(["display-message", "-p", "-t", origin, "#{pane_mode}"]).stdout.strip() == "tree-mode":
+                tree_token = tmux.run(["show-options", "-gqv", picker._navigation_option(client)]).stdout.strip()
+            # Search is an overlay within this tree navigation. Reuse its token
+            # so Escape can preserve the selection, expansion and refresh worker.
+            token = tree_token or picker.begin_navigation(client)
+            keep_tree = False
             previous_hup = signal.getsignal(signal.SIGHUP)
             previous_term = signal.getsignal(signal.SIGTERM)
             def cancelled(signum, frame):
@@ -185,38 +208,29 @@ def main(argv=None):
             signal.signal(signal.SIGHUP, cancelled)
             signal.signal(signal.SIGTERM, cancelled)
             try:
-                record = picker.pick(config, client)
+                record = picker.pick(config, client, search=args.search, popup=popup, pane=origin)
                 if record:
-                    print(f"Validating {record.host_label}/{record.name}…", flush=True)
+                    if args.search and picker.navigation_valid(client, token):
+                        native.close_tree(origin)
+                    if not popup:
+                        print(f"Validating {record.host_label}/{record.name}…", flush=True)
+                    elif record.host_id != "local":
+                        tmux.run(["display-message", "-c", client, f"Connecting to {tmux.clean(record.host_label)}/{tmux.clean(record.name)}…"])
                     _open(record, config, client, token)
+                elif (args.search and picker.navigation_valid(client, token) and
+                      native._client_pane(client) == origin):
+                    if tree_token and tmux.run(["display-message", "-p", "-t", origin, "#{pane_mode}"]).stdout.strip() == "tree-mode":
+                        tmux.run(["switch-client", "-c", client, "-T", native.BROWSE_TABLE])
+                        keep_tree = True
+                    else:
+                        native.open_tree(config, client, BIN, searchable=True)
             finally:
-                picker.end_navigation(client, token)
+                if not keep_tree:
+                    if args.search and picker.navigation_valid(client, token):
+                        native.close_tree(origin)
+                    picker.end_navigation(client, token)
                 signal.signal(signal.SIGHUP, previous_hup)
                 signal.signal(signal.SIGTERM, previous_term)
-        elif args.command == "popup":
-            client = _client(args.client)
-            client_rows = tmux.run(["list-clients", "-F", "#{client_name}|#{client_width}|#{client_height}|#{pane_id}"]).stdout.splitlines()
-            dimensions = next((line.rsplit("|", 3) for line in client_rows if line.startswith(client + "|")), None)
-            if dimensions and (int(dimensions[1]) < 45 or int(dimensions[2]) < 14):
-                tmux.run(["display-message", "-c", client, "tmux-roam: terminal too small; opening native picker"])
-                tmux.run(["choose-tree", "-Zs", "-t", dimensions[3]])
-                return 0
-            binary = BIN
-            width, height = config.width, config.height
-            if dimensions:
-                cached, _ = inventory.all_records(config, refresh=False)
-                width, height = picker.popup_size(config, int(dimensions[1]), int(dimensions[2]), len(cached))
-            command = (f"{shlex.quote(binary)} pick --client {shlex.quote(client)}; tmux_roam_exit_code=$?; "
-                       "if [ $tmux_roam_exit_code -ne 0 ]; then printf '\\nPress Enter to continue.'; read _; fi")
-            popup_args = ["display-popup", "-c", client, "-E", "-w", width, "-h", height,
-                          "-T", " Sessions ", "-b", "rounded", "-s", "bg=#24273a,fg=#cad3f5", "-S", "fg=#494d64",
-                          "-e", "TMUX_ROAM_CONFIG=" + str(config.path)]
-            if os.environ.get("TMUX_ROAM_SSH_CONFIG"):
-                popup_args += ["-e", "TMUX_ROAM_SSH_CONFIG=" + os.environ["TMUX_ROAM_SSH_CONFIG"]]
-            result = subprocess.run(tmux.args() + popup_args + [command], stdin=subprocess.DEVNULL)
-            # display-popup -C intentionally hangs up its job when toggling closed.
-            if result.returncode not in (0, 128 + signal.SIGHUP):
-                raise RuntimeError("cannot open tmux popup")
         elif args.command == "picker-state":
             picker.state_action(args.directory, args.action)
         elif args.command == "picker-header":

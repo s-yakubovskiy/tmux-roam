@@ -41,19 +41,25 @@ class LauncherContracts(unittest.TestCase):
     @unittest.skipUnless(shutil.which("zsh"), "zsh is not installed")
     def test_popup_wrapper_runs_under_zsh(self):
         run = subprocess.run
-        for binary in ("/bin/true", "/bin/false"):
-            with self.subTest(binary=binary):
+        with tempfile.TemporaryDirectory() as directory:
+            snapshot = Path(directory) / "rows"
+            snapshot.write_bytes(b"")
+            for code in (0, 1, 2, 130):
                 def shell(command, **kwargs):
                     result = run(["zsh", "-c", command[-1]], input="\n",
                                  capture_output=True, text=True)
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual("Press Enter" in result.stdout, binary == "/bin/false")
+                    self.assertEqual(result.returncode, code, result.stderr)
+                    self.assertEqual("Press Enter" in result.stdout, code == 2)
                     return result
-                with patch.object(cli, "BIN", binary), \
-                     patch.object(cli, "load", return_value=Config(Path("/unused"), ())), \
-                     patch.object(tmux, "run", return_value=subprocess.CompletedProcess([], 0, stdout="")), \
-                     patch.object(subprocess, "run", side_effect=shell):
-                    self.assertEqual(cli.main(["popup", "--client", "/dev/pts/test"]), 0)
+                with self.subTest(code=code), patch.object(subprocess, "run", side_effect=shell):
+                    def launch():
+                        return picker._popup_fzf(["sh", "-c", f"exit {code}"], snapshot,
+                                                 Config(Path("/unused"), ()), "/dev/pts/test", ("80", "20"))
+                    if code == 2:
+                        with self.assertRaisesRegex(RuntimeError, "fzf failed"):
+                            launch()
+                    else:
+                        self.assertEqual(launch().returncode, code)
 
 
 class ConfigContracts(unittest.TestCase):
@@ -96,9 +102,11 @@ class PickerLayoutContracts(unittest.TestCase):
             ident, label = line.split("\t", 1)
             plain = re.sub(r"\x1b\[[0-9;]*m", "", label)
             self.assertEqual(ident, records[0].id)
+            self.assertTrue(plain.startswith(" Omni/👩‍💻"))
             self.assertIn("…", plain)
             self.assertIn("… *", plain)
             self.assertTrue(plain.endswith("Offline"))
+            self.assertIn("\x1b[38;2;128;135;162mOffline", label)
             self.assertLessEqual(picker._width(plain), 54)
             self.assertEqual(len(picker._rows(records, {"omni": "network unavailable"}, config)), 1)
         self.assertEqual(picker.popup_size(config, 220, 80, 5), ("96", "17"))
@@ -354,28 +362,54 @@ class IsolatedTmuxContracts(unittest.TestCase):
                     return
                 time.sleep(.03)
             self.fail("popup did not reach the expected state")
+        def query():
+            sock = next(connection.runtime_dir().glob("picker-*/fzf.sock"))
+            with socket.socket(socket.AF_UNIX) as client:
+                client.settimeout(.5)
+                client.connect(str(sock))
+                client.sendall(b"GET / HTTP/1.0\r\n\r\n")
+                response = bytearray()
+                while block := client.recv(65536):
+                    response.extend(block)
+            return json.loads(response.split(b"\r\n\r\n", 1)[1])["query"]
         launchers = []
         try:
             wait_for(lambda: bool(tmux.clients()))
             client = tmux.clients()[0]["name"]
             original_session = tmux.clients()[0]["session_id"]
-            for keys, nested in (("\x1bab", ""), ("\x1bфи", "actions"), ("\x1bab", "delete"), ("\x1bфи", "delete")):
+            for keys, nested in (("\x1bab", ""), ("\x1bфи", "actions"), ("\x1bab", "delete"), ("\x1bфи", "delete"),
+                                 ("\x1b", "escape-empty"), ("\x1b", "escape-filtered"), ("\x1b", "escape-no-match")):
                 with self.subTest(keys=keys, nested=nested):
                     output.clear()
                     launcher = subprocess.Popen([binary, "popup", "--client", client],
                                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                                 stderr=subprocess.PIPE, text=True)
                     launchers.append(launcher)
-                    wait_for(lambda: b"j/k Move" in output)
+                    wait_for(lambda: b"Ctrl-o Navigate" in output)
                     time.sleep(.2)
-                    if nested == "actions":
+                    if not nested:
+                        os.write(fd, "ddввjkол".encode())
+                        wait_for(lambda: query() == "ddввjkол")
+                        self.assertEqual({s["name"] for s in tmux.sessions()}, {"start"})
+                        os.write(fd, b"\x7f" * len("ddввjkол"))
+                        wait_for(lambda: query() == "")
+                    elif nested == "actions":
                         os.write(fd, b"\x1bOQ")
                         wait_for(lambda: b"Open/retry" in output)
                         time.sleep(.2)
                     elif nested == "delete":
+                        os.write(fd, b"\x0f")  # Ctrl-o enters vi navigation.
+                        wait_for(lambda: b"dd Delete" in output)
+                        time.sleep(.2)
                         os.write(fd, b"dd")
                         wait_for(lambda: b"Delete session?" in output)
                         time.sleep(.2)
+                    elif nested in ("escape-filtered", "escape-no-match"):
+                        text = "sta" if nested == "escape-filtered" else "no-such-session"
+                        os.write(fd, text.encode())
+                        wait_for(lambda: query() == text)
+                        if nested == "escape-no-match":
+                            wait_for(lambda: b"No matching sessions" in output and b"Esc Close" in output)
                     os.write(fd, keys[:-1].encode())
                     time.sleep(.15)
                     os.write(fd, keys[-1].encode())
@@ -389,6 +423,8 @@ class IsolatedTmuxContracts(unittest.TestCase):
                                         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                         stderr=subprocess.PIPE, text=True)
             launchers.append(launcher)
+            wait_for(lambda: b"Ctrl-o Navigate" in output)
+            os.write(fd, b"\x0f")
             wait_for(lambda: b"dd Delete" in output)
             time.sleep(.2)
             os.write(fd, b"gdd")
@@ -432,10 +468,15 @@ class IsolatedTmuxContracts(unittest.TestCase):
     def test_install_unload_preserves_user_binding_and_later_edit(self):
         tmux.run(["bind-key", "-T", "prefix", "s", "choose-tree", "-Zs"])
         original = integration._binding("prefix", "s")
+        last_session = integration._binding("prefix", "L")
+        tmux.run(["bind-key", "-T", "prefix", "Д", "display-message", "custom-session"])
         integration.install(str(Path(__file__).resolve().parent.parent / "bin" / "tmux-roam"))
         self.assertIn("run-shell", integration._binding("prefix", "s"))
+        self.assertIn("switch-client -l", integration._binding("prefix", "Д"))
         integration.unload()
         self.assertEqual(original, integration._binding("prefix", "s"))
+        self.assertEqual(last_session, integration._binding("prefix", "L"))
+        self.assertIn("custom-session", integration._binding("prefix", "Д"))
         integration.install(str(Path(__file__).resolve().parent.parent / "bin" / "tmux-roam"))
         tmux.run(["bind-key", "-T", "prefix", "s", "display-message", "custom"])
         integration.unload()
@@ -483,7 +524,8 @@ class IsolatedTmuxContracts(unittest.TestCase):
             tmux.run(["set-option", "-t", local, option, value])
         connection._write_state("test-token", dict(status="open", pid=42, tty="/dev/pts/99"))
         response = ("12|100|/tmp/remote\n$1|101|pipe|name|2|1|M-a\n" +
-                    inventory.CLIENT_MARKER + "\n42|/dev/pts/99|$1|client\n").encode()
+                    inventory.CLIENT_MARKER + "\n42|/dev/pts/99|$1|client\n" + inventory.WINDOW_MARKER +
+                    "\n$1|@1|0|1|shell\n$1|@2|1|0|editor\n").encode()
         with patch.object(inventory, "capture_bounded", return_value=(0, response, b"", None)) as capture, \
              patch.object(tmux, "client_exists", return_value=True), patch.object(tmux, "switch") as switch:
             self.assertEqual(connection.open_remote(record, host, config, "test-client"), local)
@@ -747,6 +789,34 @@ class IsolatedTmuxContracts(unittest.TestCase):
                     wait_for(lambda: tmux.run(["show-buffer"], check=False).stdout.strip() == "ROAM_COPY_TEST")
                     wait_for(lambda: any(base64.b64decode(payload).rstrip(b"\n") == b"ROAM_COPY_TEST"
                                          for payload in re.findall(rb"\x1b\]52;[^;]*;([A-Za-z0-9+/=]*)(?:\x07|\x1b\\)", output)))
+            # The same physical shortcut switches the outer client in every table.
+            local = tmux.run(["new-session", "-d", "-P", "-F", "#{session_id}", "-s", "local"]).stdout.strip()
+            other = tmux.run(["new-session", "-d", "-P", "-F", "#{session_id}", "-s", "other-roaming"]).stdout.strip()
+            start = tmux.run(["display-message", "-p", "-t", "start", "#{session_id}"]).stdout.strip()
+            tmux.run(["set-option", "-t", local, "prefix", "M-a"])
+            tmux.run(["bind-key", "-n", "M-ф", "switch-client", "-T", "prefix"])
+            tmux.run(["bind-key", "-T", "off", "M-a", "switch-client", "-T", "off-prefix"])
+            tmux.run(["bind-key", "-T", "off", "M-ф", "switch-client", "-T", "off-prefix"])
+            tmux.run(["bind-key", "-T", "off-prefix", "Any", "send-keys"])
+            integration.install(str(Path(__file__).resolve().parent.parent / "bin" / "tmux-roam"))
+            client = tmux.clients()[0]["name"]
+            remote_run("bind-key", "L", "set-option", "-g", "@remote-last-session", "yes")
+            for table in ("root", "off", "roam-root-ma", "roam-root-cb", "roam-root-none"):
+                with self.subTest(last_session_table=table):
+                    tmux.run(["set-option", "-t", "start", "key-table", table])
+                    tmux.run(["set-option", "-t", "start", "prefix", "M-a" if table == "root" else "None"])
+                    tmux.run(["set-option", "-t", other, "key-table", table])
+                    tmux.run(["set-option", "-t", other, "prefix", "M-a" if table == "root" else "None"])
+                    for previous in (local, other):
+                        tmux.switch(client, previous)
+                        tmux.switch(client, start)
+                        for keys, target in ((b"\x1baL", previous), ("\x1bфД".encode(), start)):
+                            os.write(fd, keys)
+                            wait_for(lambda: tmux.clients()[0]["session_id"] == target)
+                    self.assertEqual(remote_run("show-options", "-gqv", "@remote-last-session"), "")
+            tmux.run(["set-option", "-t", "start", "key-table", "roam-root-cb"])
+            os.write(fd, b"\x1ba\x1b[24~L")  # F12 still reaches the remote command explicitly.
+            wait_for(lambda: remote_run("show-options", "-gqv", "@remote-last-session") == "yes")
             for suffix in ("ma", "cb", "none"):
                 with self.subTest(mouse_routing=suffix):
                     tmux.run(["set-option", "-t", "start", "key-table", "roam-root-" + suffix])
@@ -832,6 +902,462 @@ class IsolatedTmuxContracts(unittest.TestCase):
         tmux.run(["set-option", "-g", "@tmux-roam-native", "off"])
         integration.install(binary)
         self.assertIn("choose-tree -Zs", integration._binding("prefix", "s"))
+
+    def test_remote_window_discovery_selection_cache_and_mirror_cleanup(self):
+        remote = ["tmux", "-S", str(Path(self.directory.name) / "remote.sock")]
+        host = Host("remote", "Remote", "unused", socket_path=remote[-1])
+        config = Config(Path(self.directory.name) / "config.toml", (host,))
+        env = dict(os.environ)
+        env.pop("TMUX", None)
+        subprocess.run(remote + ["-f", "/dev/null", "new-session", "-d", "-s", "project", "-n", "shell", "sleep 60"], env=env, check=True)
+        subprocess.run(remote + ["new-window", "-d", "-t", "project:3", "-n", "quote'|🌲", "sleep 60"], check=True)
+        tmux.run(["set-option", "-g", "@tmux-roam-native-windows", "on"])
+        clients = []
+        try:
+            with patch.object(inventory, "ssh_base", return_value=["sh", "-c"]):
+                snapshot, error = inventory.remote_snapshot(host, config)
+                self.assertIsNone(error)
+                record = snapshot.records[0]
+                self.assertEqual([(w["index"], w["name"]) for w in record.window_details], [(0, "shell"), (3, "quote'|🌲")])
+                window = record.window_details[1]["id"]
+                inventory.save(host, [record])
+                self.assertEqual(inventory.cached(host)[0].window_details, record.window_details)
+                native.sync_host(host, [record], fresh=True)
+                sid = connection._owned_sessions()[0][0]
+                token = native._option(sid, connection.STATE)
+                carrier_pane = connection._read_state(token)["pane"]
+                def mirrors():
+                    return {entry[4]: entry for entry in native._window_entries(sid) if entry[3] == record.id}
+                self.assertEqual(set(mirrors()), {w["id"] for w in record.window_details})
+                self.assertEqual({entry[1] for entry in mirrors().values()}, {"0", "3"})
+                self.assertEqual(tmux.clients(remote), [])  # Discovery never attaches a remote client.
+                before = native._window_entries(sid)
+                native.sync_host(host, inventory.cached(host), error="offline")
+                self.assertEqual(native._window_entries(sid), before)
+                subprocess.run(remote + ["rename-window", "-t", window, "renamed|🤖"], check=True)
+                snapshot, error = inventory.remote_snapshot(host, config)
+                self.assertIsNone(error)
+                record = snapshot.records[0]
+                native.sync_host(host, [record], fresh=True)
+                self.assertEqual(native._window_entries(sid), before)  # Names update in place.
+                self.assertEqual(native._window_option(mirrors()[window][0], "@tmux-roam-window-name"), "renamed|🤖")
+                # Control clients let us exercise exact selection without any SSH attachment.
+                for base, target in ((self.base, "start"), (remote, "project")):
+                    process = subprocess.Popen(base + ["-C", "attach-session", "-t", target], env=env,
+                                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    clients.append(process)
+                    self._wait_for(lambda: bool(tmux.clients(base)))
+                client = tmux.clients()[0]["name"]
+                remote_client = tmux.clients(remote)[0]
+                connection._write_state(token, dict(status="open", pid=remote_client["pid"], tty=remote_client["tty"]))
+                navigation = picker.begin_navigation(client)
+                target = mirrors()[window][2]
+                native.select(config, client, target, navigation)
+                self.assertEqual(tmux.clients()[0]["session_id"], sid)
+                self.assertEqual(native._client_pane(client), carrier_pane)
+                self.assertEqual(len(native._window_entries(sid)), 1)
+                self.assertEqual(tmux.run(["display-message", "-p", "-t", "project", "#{window_id}"], remote).stdout.strip(), window)
+                self.assertEqual(len(tmux.clients(remote)), 1)  # Reused, not duplicated.
+                with self.assertRaisesRegex(RuntimeError, "window ended or moved"):
+                    connection.open_remote(record, host, config, client, window="@99999")
+                with self.assertRaises(RuntimeError):
+                    connection._select_remote_window(replace(record, generation="1/1"), host, config, record.window_details[0]["id"])
+                self.assertEqual(tmux.run(["display-message", "-p", "-t", "project", "#{window_id}"], remote).stdout.strip(), window)
+                tmux.switch(client, "start")
+                native.sync_host(host, [record], fresh=True)
+                subprocess.run(remote + ["kill-window", "-t", window], check=True)
+                snapshot, error = inventory.remote_snapshot(host, config)
+                self.assertIsNone(error)
+                native.sync_host(host, snapshot.records, fresh=True)
+                self.assertNotIn(window, mirrors())
+                tmux.run(["set-option", "-g", "@tmux-roam-native-windows", "off"])
+                integration.install(str(Path(__file__).resolve().parent.parent / "bin" / "tmux-roam"))
+                self.assertFalse(mirrors())
+                self.assertEqual(native._window_entries(sid)[0][1], "0")
+        finally:
+            for process in clients:
+                process.communicate(b"detach-client\n", timeout=3)
+            subprocess.run(remote + ["kill-server"], capture_output=True)
+
+    def test_window_mirror_cleanup_preserves_user_changes_and_failed_carrier_reuse(self):
+        config, host, record, sid, token, pane, _ = self._failed_connection()
+        record.window_details = [dict(id="@1", index=0, active=True, name="shell"),
+                                 dict(id="@2", index=2, active=False, name="editor")]
+        tmux.run(["set-option", "-g", "@tmux-roam-native-windows", "on"])
+        native.sync_host(host, [record], fresh=True)
+        entries = [e for e in native._window_entries(sid) if e[3]]
+        modified = entries[0]
+        tmux.run(["respawn-pane", "-k", "-t", modified[2], "sleep 60"])
+        native.remove_inactive(sid, record.id, ended=True)
+        self.assertTrue(tmux.run(["has-session", "-t", sid], check=False).returncode == 0)
+        self.assertEqual(tmux.run(["display-message", "-p", "-t", modified[2], "#{pane_dead}"]).stdout.strip(), "0")
+        tmux.run(["kill-window", "-t", modified[0]])  # Explicitly remove only the test's added work.
+        native.sync_host(host, [record], fresh=True)
+        snapshot = inventory.RemoteSnapshot([record], {}, {record.session_id: "M-a"})
+        with patch.object(inventory, "remote_snapshot", return_value=(snapshot, None)), \
+             patch.object(connection, "_client_size", return_value=("100", "30")):
+            with self.assertRaisesRegex(RuntimeError, "SSH exit 255"):
+                connection.open_remote(record, host, config, "test-client")
+        token = native._option(sid, connection.STATE)
+        self.assertEqual(connection._managed_pane(sid, record.id, token)["pane_id"], pane)
+        self.assertEqual(connection._owned_sessions(), [(sid, record.id)])
+
+    def test_native_compact_rows_current_session_and_refresh_preserve_selection(self):
+        tmux.run(["respawn-pane", "-k", "-t", "start", "sleep 60"])
+        tmux.run(["rename-session", "-t", "start", "🐱dev"])
+        tmux.run(["set-option", "-gw", "mode-keys", "vi"])
+        tmux.run(["set-option", "-gw", "tree-mode-selection-style", "fg=#cad3f5,bg=#494d64,bold"])
+        local = tmux.sessions()[0]["session_id"]
+        other = tmux.run(["new-session", "-d", "-P", "-F", "#{session_id}", "-s", "🌲pnl", "sleep 60"]).stdout.strip()
+        dd, omni = Host("dd", "DD", "unused"), Host("omni", "OMNI", "unused")
+        for host, colour in ((dd, "#a6da95"), (omni, "#f5a97f")):
+            tmux.run(["set-option", "-g", "@tmux-roam-native-colour-" + host.id, colour])
+        records = inventory._records(dd.id, dd.label, ("12", "100", "/tmp/remote"),
+                                    [dict(session_id="$1", created=101, name="gitlab", windows=3, clients=0),
+                                     dict(session_id="$2", created=102, name="🌲", windows=2, clients=0)], "live")
+        remote = inventory._records(omni.id, omni.label, ("15", "100", "/tmp/omni"),
+                                    [dict(session_id="$1", created=101, name="🤖", windows=4, clients=0)], "live")[0]
+        native.sync_host(dd, records, fresh=True)
+        native.sync_host(omni, [remote], fresh=True)
+        env = dict(os.environ)
+        env.pop("TMUX", None)
+        control = subprocess.Popen(self.base + ["-C", "attach-session", "-f", "ignore-size,no-output", "-t", other],
+                                   env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.execvpe("tmux", self.base + ["attach-session", "-t", local], dict(env, TERM="xterm-256color"))
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 28, 110, 0, 0))
+        def capture():
+            output = bytearray()
+            deadline = time.monotonic() + .15
+            while time.monotonic() < deadline:
+                if select.select([fd], [], [], .01)[0]:
+                    output.extend(os.read(fd, 65536))
+            return output.decode("utf-8", "replace")
+        def plain(value):
+            value = re.sub(r"\x1b\[([0-9]+)C", lambda m: " " * int(m[1]), value)
+            return re.sub(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[()][0-9A-Za-z])", "", value)
+        try:
+            self._wait_for(lambda: len(tmux.clients()) == 2)
+            capture()
+            client = next(c["name"] for c in tmux.clients() if c["session_id"] == local)
+            pane = native._client_pane(client)
+            native.open_tree(load(), client, "/bin/true")
+            coloured = capture()
+            frame = plain(coloured)
+            self.assertIn("3w  Ready", frame)
+            self.assertIn("4w  Ready", frame)
+            rows = list(dict.fromkeys(re.findall(r"\([0-9]+\) \+ [^\r\n]+", frame)))
+            self.assertEqual(len(rows), 5)  # Session rows start collapsed above the preview.
+            self.assertNotIn("Remote session available", frame)
+            self.assertNotIn("#[", frame)
+            self.assertEqual([line.split(":", 1)[0] for line in rows if line.endswith("*")], ["(0) + 🐱dev"])
+            widths = {picker._width(line[:re.search(r"\dw", line).start()]) for line in rows}
+            self.assertEqual(len(widths), 1, rows)
+            self.assertIn("38;2;147;154;183", coloured)  # Counts and Ready are neutral.
+            self.assertNotIn("38;2;245;169;127", coloured)
+            self.assertIn("48;2;73;77;100", coloured)
+            dd_session = next(s for s, ident in connection._owned_sessions() if ident == records[0].id)
+            omni_session = next(s for s, ident in connection._owned_sessions() if ident == remote.id)
+            native.decorate(dd_session, records[0], "connected")
+            native.decorate(omni_session, remote, "connected")
+            tmux.run(["refresh-client", "-t", client])
+            coloured = capture()
+            connected_colours = re.findall(r"\x1b\[38;2;([0-9;]+)mConnected", coloured)
+            self.assertGreaterEqual(len(connected_colours), 2)
+            self.assertEqual(set(connected_colours), {"166;218;149"})
+            os.write(fd, b"jj")  # Remote placeholder has an actual bottom preview.
+            self.assertIn("Remote session available", plain(capture()))
+            os.write(fd, b"kk")
+            capture()
+            os.write(fd, b"j")  # Select the other local session, independently of the current marker.
+            capture()
+            remote.observed = time.time() - 12 * 60
+            native.sync_host(omni, [remote], error="network unavailable")
+            tmux.run(["refresh-client", "-t", client])
+            coloured = capture()
+            self.assertIn("Unavailable · seen 12m ago", plain(coloured))
+            self.assertIn("38;2;128;135;162", coloured)
+            native.sync_host(omni, [remote])
+            tmux.run(["refresh-client", "-t", client])
+            coloured = capture()
+            self.assertIn("Checking…", plain(coloured))
+            self.assertIn("\x1b[38;2;138;173;244mChecking", coloured)
+            native.sync_host(omni, [remote], fresh=True)
+            tmux.run(["refresh-client", "-t", client])
+            self.assertIn("4w  Ready", plain(capture()))
+            sid = next(s for s, ident in connection._owned_sessions() if ident == records[0].id)
+            connection._write_state(native._option(sid, connection.STATE), dict(status="disconnected"))
+            native.sync_host(dd, records, fresh=True)
+            tmux.run(["refresh-client", "-t", client])
+            coloured = capture()
+            self.assertIn("3w  Reconnect", plain(coloured))
+            self.assertIn("\x1b[38;2;238;212;159mReconnect", coloured)
+            os.write(fd, b"\r")
+            self._wait_for(lambda: next(c["session_id"] for c in tmux.clients() if c["name"] == client) == other)
+        finally:
+            control.communicate(b"detach-client\n", timeout=3)
+            subprocess.run(self.base + ["kill-server"], capture_output=True)
+            os.close(fd)
+            os.waitpid(pid, 0)
+
+    @unittest.skipUnless(shutil.which("fzf"), "fzf is not installed")
+    def test_native_slash_fzf_search_selection_escape_and_toggle(self):
+        binary = str(Path(__file__).resolve().parent.parent / "bin" / "tmux-roam")
+        root = Path(self.directory.name)
+        wrapper, started, release = root / "delayed-launch", root / "started", root / "release"
+        wrapper.write_text('#!/bin/sh\nif [ "$1" = popup ]; then\n' +
+                           "touch " + shlex.quote(str(started)) + "\nwhile [ ! -e " + shlex.quote(str(release)) +
+                           " ]; do sleep .01; done\nfi\nexec " + shlex.quote(binary) + ' "$@"\n')
+        wrapper.chmod(0o700)
+        tmux.run(["respawn-pane", "-k", "-t", "start", "sleep 60"])
+        other = tmux.run(["new-session", "-d", "-P", "-F", "#{session_id}", "-s", "project-pine", "sleep 60"]).stdout.strip()
+        for key, value in (("prefix", "M-a"), ("@tmux-roam-native", "on"),
+                           ("@tmux-roam-native-keys", "s ы S Ы"), ("@tmux-roam-native-fuzzy-keys", "s ы"),
+                           ("@tmux-roam-native-search", "fzf"), ("@tmux-roam-chooser-keys", "b и")):
+            tmux.run(["set-option", "-g", key, value])
+        tmux.run(["bind-key", "-n", "M-ф", "switch-client", "-T", "prefix"])
+        tmux.run(["set-option", "-gw", "mode-keys", "vi"])
+        integration.install(str(wrapper))
+        env = dict(os.environ, TERM="xterm-256color")
+        env.pop("TMUX", None)
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.execvpe("tmux", self.base + ["attach-session", "-t", "start"], env)
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 110, 0, 0))
+        output, stop = bytearray(), threading.Event()
+        def drain():
+            while not stop.is_set():
+                try:
+                    if select.select([fd], [], [], .05)[0]:
+                        block = os.read(fd, 65536)
+                        output.extend(block)
+                        if b"\x1b[6n" in block:
+                            os.write(fd, b"\x1b[1;1R")
+                except OSError:
+                    return
+        reader = threading.Thread(target=drain, daemon=True)
+        reader.start()
+        def mode():
+            return tmux.run(["display-message", "-p", "-t", native._client_pane(client), "#{pane_mode}"]).stdout.strip()
+        def search_state():
+            for path in connection.runtime_dir().glob("picker-*/fzf.sock"):
+                try:
+                    with socket.socket(socket.AF_UNIX) as sock:
+                        sock.settimeout(.2)
+                        sock.connect(str(path))
+                        sock.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                        data = b""
+                        while block := sock.recv(65536):
+                            data += block
+                    return json.loads(data.split(b"\r\n\r\n", 1)[1])
+                except (OSError, ValueError, IndexError):
+                    pass
+            return {}
+        try:
+            self._wait_for(lambda: bool(tmux.clients()))
+            client = tmux.clients()[0]["name"]
+            os.write(fd, b"\x1bas")
+            self._wait_for(lambda: mode() == "tree-mode")
+            origin = native._client_pane(client)
+            tree_token = tmux.run(["show-options", "-gqv", picker._navigation_option(client)]).stdout.strip()
+            os.write(fd, b"/")
+            self._wait_for(started.exists)
+            self.assertEqual(mode(), "tree-mode")  # Keep the tree visible throughout startup.
+            release.touch()
+            self._wait_for(lambda: "query" in search_state())
+            self._wait_for(lambda: b"Esc Back to tree" in output)
+            self.assertEqual(mode(), "tree-mode")  # Search covers only the bottom preview.
+            self.assertTrue(picker.navigation_valid(client, tree_token))
+            os.write(fd, "ddввjkол".encode())
+            self._wait_for(lambda: search_state().get("query") == "ddввjkол")
+            os.write(fd, b"\x1b")
+            self._wait_for(lambda: mode() == "tree-mode" and not search_state())
+            self.assertTrue(picker.navigation_valid(client, tree_token))  # Same tree and expanded rows.
+            os.write(fd, b"/")
+            self._wait_for(lambda: "query" in search_state())
+            os.write(fd, b"local/prpi")  # Match a host/project path while retaining exact identity.
+            def selected_match():
+                state = search_state()
+                return (state.get("query") == "local/prpi" and state.get("matchCount") == 1 and
+                        "project-pine" in (state.get("current") or {}).get("text", ""))
+            self._wait_for(selected_match)
+            time.sleep(.15)  # Let fzf finish its initial reload and render the match.
+            os.write(fd, b"\r")
+            self._wait_for(lambda: tmux.clients()[0]["session_id"] == other and not search_state())
+            self.assertEqual(tmux.run(["display-message", "-p", "-t", origin, "#{pane_mode}"]).stdout.strip(), "")
+            time.sleep(.15)  # The selected pane precedes the popup's final repaint.
+            # Both routes and layouts close the whole search without reopening the tree.
+            for managed in (False, True):
+                if managed:
+                    tmux.run(["set-option", "-t", other, "prefix", "None"])
+                    tmux.run(["set-option", "-t", other, "key-table", "roam-root-ma"])
+                for shortcut, slash in ((b"\x1bas", b"/"), ("\x1bфы".encode(), b".")):
+                    os.write(fd, shortcut)
+                    self._wait_for(lambda: mode() == "tree-mode")
+                    os.write(fd, slash)
+                    self._wait_for(lambda: "query" in search_state())
+                    os.write(fd, shortcut)
+                    self._wait_for(lambda: not search_state())
+                    time.sleep(.15)
+                    self.assertEqual(mode(), "")
+                    self.assertEqual(tmux.clients()[0]["session_id"], other)
+            self.assertNotIn(b"returned 2", output)
+            self.assertNotIn(b"Press Enter to continue", output)
+        finally:
+            stop.set()
+            subprocess.run(self.base + ["kill-server"], capture_output=True)
+            reader.join(timeout=1)
+            os.close(fd)
+            os.waitpid(pid, 0)
+
+    def test_native_fuzzy_filtering_local_remote_cancel_and_tree_fallback(self):
+        root = Path(self.directory.name)
+        calls, binary = root / "calls", root / "slow-roam"
+        binary.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> ' + shlex.quote(str(calls)) + '\nsleep 2\n')
+        binary.chmod(0o700)
+        tmux.run(["respawn-pane", "-k", "-t", "start", "sleep 60"])
+        local = tmux.run(["new-session", "-d", "-P", "-F", "#{session_id}", "-s", "project-pine", "sleep 60"]).stdout.strip()
+        host = Host("dd", "DD", "unused")
+        record = inventory._records(host.id, host.label, ("12", "100", "/tmp/remote"),
+                                    [dict(session_id="$1", created=101, name="gitlab", windows=3, clients=0)], "live")[0]
+        native.sync_host(host, [record], fresh=True)
+        remote = connection._owned_sessions()[0][0]
+        remote_pane = connection._read_state(native._option(remote, connection.STATE))["pane"]
+        for key, value in (("prefix", "M-a"), ("@tmux-roam-native", "on"),
+                           ("@tmux-roam-native-keys", "s ы S Ы"), ("@tmux-roam-native-fuzzy-keys", "s ы"),
+                           ("@tmux-roam-chooser-keys", "b и")):
+            tmux.run(["set-option", "-g", key, value])
+        tmux.run(["set-option", "-gw", "mode-keys", "vi"])
+        tmux.run(["bind-key", "-n", "M-ф", "switch-client", "-T", "prefix"])
+        tmux.run(["set-option", "-g", "mouse", "on"])
+        integration.install(str(binary))
+        for table in ("prefix", "roam-prefix-ma", "roam-prefix-cb"):
+            for key in ("s", "ы"):
+                self.assertIn("choose-tree -Zs", integration._binding(table, key))
+                self.assertIn(native.BROWSE_TABLE, integration._binding(table, key))
+            for key in ("S", "Ы"):
+                self.assertIn("choose-tree -Zs", integration._binding(table, key))
+        env = dict(os.environ, TERM="xterm-256color")
+        env.pop("TMUX", None)
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.execvpe("tmux", self.base + ["attach-session", "-t", "start"], env)
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 28, 110, 0, 0))
+        worker = None
+        def mode():
+            return tmux.run(["display-message", "-p", "-t", native._client_pane(client), "#{pane_mode}"]).stdout.strip()
+        try:
+            self._wait_for(lambda: bool(tmux.clients()))
+            client = tmux.clients()[0]["name"]
+            start = tmux.clients()[0]["session_id"]
+            # Russian physical j/k move tree rows and may be mixed with Latin.
+            for keys, target in (("о\r", local), ("л\r", start), ("jло\r", local), ("лjл\r", start)):
+                os.write(fd, b"\x1bas")
+                self._wait_for(lambda: mode() == "tree-mode")
+                os.write(fd, keys.encode())
+                self._wait_for(lambda: mode() == "" and tmux.clients()[0]["session_id"] == target)
+            os.write(fd, b"\x1bas")
+            self._wait_for(lambda: mode() == "tree-mode")
+            os.write(fd, b"jk/")
+            self._wait_for(lambda: mode() == "switch-mode")
+            os.write(fd, b"prpi\r")  # Fuzzy subsequence, not a substring.
+            self._wait_for(lambda: tmux.clients()[0]["session_id"] == local)
+            self.assertNotIn("native-select", calls.read_text())
+            os.write(fd, b"\x1baS")
+            self._wait_for(lambda: mode() == "tree-mode")
+            os.write(fd, b"\x1b")
+            self._wait_for(lambda: mode() == "")
+            # A native mouse/command exit may leave a one-shot client table.
+            # Its next key must be replayed through the usual root bindings.
+            for key in ("/", ".", "x", "о", "л"):
+                tmux.run(["bind-key", "-n", key, "set-option", "-g", "@replayed", key])
+                os.write(fd, b"\x1bas")
+                self._wait_for(lambda: mode() == "tree-mode")
+                tmux.run(["send-keys", "-t", native._client_pane(client), "Escape"])
+                self._wait_for(lambda: mode() == "")
+                os.write(fd, key.encode())
+                self._wait_for(lambda: tmux.run(["show-options", "-gqv", "@replayed"]).stdout.strip() == key)
+            # Repeating the shortcut closes the picker without starting another refresh.
+            os.write(fd, b"\x1bas")
+            self._wait_for(lambda: mode() == "tree-mode")
+            option = picker._navigation_option(client)
+            token = tmux.run(["show-options", "-gqv", option]).stdout.strip()
+            os.write(fd, b"\x1bas")
+            self._wait_for(lambda: mode() == "")
+            self.assertEqual(tmux.run(["show-options", "-gqv", option]).stdout.strip(), token)
+            os.write(fd, b"\x1bas")
+            self._wait_for(lambda: mode() == "tree-mode")
+            # A click chooses the first row; slash must still work afterward.
+            os.write(fd, b"\x1b[<0;12;1M\x1b[<0;12;1m")
+            time.sleep(.05)
+            os.write(fd, b"/")
+            self._wait_for(lambda: mode() == "switch-mode")
+            os.write(fd, b"\x1b")
+            self._wait_for(lambda: mode() == "tree-mode")
+            # Double click opens the first row, retaining native mouse behavior.
+            os.write(fd, b"\x1b[<0;12;1M\x1b[<0;12;1m\x1b[<0;12;1M\x1b[<0;12;1m")
+            self._wait_for(lambda: mode() == "")
+            self.assertEqual(tmux.clients()[0]["session_id"],
+                             next(s["session_id"] for s in tmux.sessions() if s["name"] == "start"))
+            tmux.switch(client, local)
+            tmux.run(["set-option", "-t", local, "prefix", "None"])
+            tmux.run(["set-option", "-t", local, "key-table", "roam-root-ma"])
+            # Both keyboard layouts toggle from browse and search on the remote routing table.
+            for shortcut in (b"\x1bas", "\x1bфы".encode()):
+                for search in (False, True):
+                    os.write(fd, shortcut)
+                    self._wait_for(lambda: mode() == "tree-mode")
+                    if search:
+                        os.write(fd, b"/git")
+                        self._wait_for(lambda: mode() == "switch-mode")
+                    os.write(fd, shortcut)
+                    self._wait_for(lambda: mode() == "")
+                    self.assertEqual(tmux.clients()[0]["session_id"], local)
+            os.write(fd, "\x1bфы".encode())
+            self._wait_for(lambda: mode() == "tree-mode")
+            os.write(fd, b".")
+            self._wait_for(lambda: mode() == "switch-mode")
+            os.write(fd, b"no-such-session\r")
+            time.sleep(.05)
+            self.assertEqual(mode(), "switch-mode")
+            os.write(fd, b"\x1b")
+            self._wait_for(lambda: mode() == "tree-mode")
+            os.write(fd, b"\x1b")
+            self._wait_for(lambda: mode() == "")
+            self.assertEqual(tmux.clients()[0]["session_id"], local)
+            os.write(fd, b"\x1bas")
+            self._wait_for(lambda: mode() == "tree-mode")
+            os.write(fd, b"/")
+            self._wait_for(lambda: mode() == "switch-mode")
+            os.write(fd, b"ddgt")
+            # The real refresh worker must run in fuzzy mode without losing the query.
+            pane = native._client_pane(client)
+            token = tmux.run(["show-options", "-gqv", picker._navigation_option(client)]).stdout.strip()
+            record.windows = 7
+            with patch.object(inventory, "remote", return_value=([record], None)) as discovery:
+                worker = threading.Thread(target=native.refresh, args=(Config(root / "config.toml", (host,)), client, pane, token))
+                worker.start()
+                self._wait_for(lambda: native._option(remote, native.WINDOWS) == "7")
+                discovery.assert_called()
+                os.write(fd, b"\r")
+                self._wait_for(lambda: "native-select" in calls.read_text())
+                worker.join(timeout=3)
+                self.assertFalse(worker.is_alive())
+            selected = next(line for line in calls.read_text().splitlines() if line.startswith("native-select"))
+            self.assertIn("--client " + client, selected)
+            self.assertIn("--target " + remote_pane, selected)
+            self.assertEqual(tmux.clients()[0]["session_id"], local)  # Only the stub selection helper ran.
+            tmux.run(["set-option", "-g", "@tmux-roam-native-fuzzy-keys", ""])
+            integration.install(str(binary))
+            for table in (native.BROWSE_TABLE, native.SEARCH_TABLE):
+                self.assertEqual(tmux.run(["list-keys", "-T", table], check=False).stdout, "")
+        finally:
+            subprocess.run(self.base + ["kill-server"], capture_output=True)
+            if worker:
+                worker.join(timeout=3)
+            os.close(fd)
+            os.waitpid(pid, 0)
 
     def test_ended_cleanup_preserves_outages_and_active_or_modified_panes(self):
         host = Host("remote", "Remote", "example")

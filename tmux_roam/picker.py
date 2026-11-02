@@ -19,6 +19,14 @@ from .config import hidden
 from .connection import runtime_dir
 
 
+STATUS_COLOURS = {
+    "Connected": "#a6da95", "Reconnect": "#eed49f",
+    "Checking": "#8aadf4", "Connecting": "#8aadf4",
+    "Ready": "#939ab7", "Current": "#cad3f5",
+    "Unavailable": "#8087a2", "Offline": "#8087a2", "Ended": "#8087a2",
+}
+
+
 def _glyphs(text):
     cluster = ""
     for char in text:
@@ -56,24 +64,19 @@ def _fit(text, width, right=False):
 
 def _columns():
     available = int(os.environ.get("TMUX_ROAM_COLUMNS", shutil.get_terminal_size((96, 24)).columns)) - 6
-    if available < 54:
-        return 10, max(8, available - 25), 0, 11
-    return 12, max(12, available - 37), 7, 12
+    windows = 4 if available >= 54 else 0
+    return max(12, min(40, available - windows - (16 if windows else 14))), windows, 12
 
 
 def _table_row(host, name, windows, state):
-    widths = _columns()
-    return "  ".join(_fit(text, width, right=index == 2) for index, (text, width)
-                     in enumerate(zip((host, name, windows, state), widths)) if width).rstrip()
+    project = host + "/" + name if host else name
+    return "  ".join(_fit(text, width, right=index == 1) for index, (text, width)
+                     in enumerate(zip((project, windows, state), _columns())) if width).rstrip()
 
 
-def _paint(text, foreground, background=None):
-    def rgb(value):
-        return ";".join(str(int(value[i:i + 2], 16)) for i in (1, 3, 5))
-    codes = "38;2;" + rgb(foreground)
-    if background:
-        codes += ";48;2;" + rgb(background)
-    return "\x1b[" + codes + "m" + text + "\x1b[0m"
+def _paint(text, foreground):
+    rgb = ";".join(str(int(foreground[i:i + 2], 16)) for i in (1, 3, 5))
+    return "\x1b[38;2;" + rgb + "m" + text + "\x1b[0m"
 
 
 def popup_size(config, columns, lines, count):
@@ -102,14 +105,24 @@ def _fzf_env():
     return env
 
 
-def _fzf_options(prompt, navigation=True, delete_command=None, footer=None):
+def _fzf_options(prompt, navigation=True, delete_command=None, footer=None, *, search_only=False):
     """Use fzf's input toggle and bindings for vi mode in every picker menu."""
-    chooser = tmux.run(["show-options", "-gqv", "@tmux-roam-chooser-keys"], check=False).stdout.split() or ["s", "ы"]
+    option = "@tmux-roam-native-keys" if search_only else "@tmux-roam-chooser-keys"
+    chooser = tmux.run(["show-options", "-gqv", option], check=False).stdout.split() or ["s", "ы"]
+    if search_only:
+        navigation = False
+        close_hint = "Alt+a " + chooser[0] + " Close"
+        if int(os.environ.get("TMUX_ROAM_COLUMNS", "96")) < 70:
+            footer = "↑/↓ Move  Enter Open  Esc Back\nTab Details  " + close_hint
+        else:
+            footer = "\n".join("".join(f"{label:<20}" for label in row).rstrip() for row in (
+                ("↑/↓ Move", "Enter Open", "Esc Back to tree"),
+                ("Tab Details", "Ctrl-r Refresh", close_hint)))
     toggle = [key.lower() if key.startswith("F") and key[1:].isdigit() else key for key in chooser]
     toggle_keys = ",".join(toggle)
     disarm = "unbind(" + toggle_keys + ")"
     normal_prompt, search_prompt = prompt + " [vi]> ", "Search> " if prompt == "Sessions" else prompt + "> "
-    footer = _footer(prompt, navigation) if footer is None else footer
+    footer = _footer(prompt, navigation or prompt == "Sessions") if footer is None else footer
     movement = {"j": "down", "о": "down", "k": "up", "л": "up",
                 "g": "first", "п": "first", "G": "last", "П": "last",
                 "ctrl-d": "half-page-down", "ctrl-u": "half-page-up"}
@@ -118,11 +131,13 @@ def _fzf_options(prompt, navigation=True, delete_command=None, footer=None):
         mode_keys += ",d,в"
     footer_command = ('if [ -n "$FZF_QUERY" ]; then printf "Filter: %s\\n" "$FZF_QUERY"; fi; printf %s ' +
                       shlex.quote(footer))
-    search_footer = "Enter Select    Esc Back to navigation"
+    session_picker = prompt == "Sessions" and not search_only
+    search_footer = (footer if search_only else "Enter Open    Ctrl-o Navigate    Esc Close" if session_picker
+                     else "Enter Select    Esc Back to navigation")
     empty = "No matching sessions\n" if prompt == "Sessions" else "No matches\n"
-    new_hint = "  Ctrl-n New" if prompt == "Sessions" else ""
+    new_hint = "  Ctrl-n New" if prompt == "Sessions" and not search_only else ""
     result_footer = ('if [ "${FZF_MATCH_COUNT:-1}" = 0 ]; then if [ "$FZF_PROMPT" = ' +
-                     shlex.quote(search_prompt) + ' ]; then printf %s ' + shlex.quote(empty + "Edit search  Esc Back" + new_hint) +
+                     shlex.quote(search_prompt) + ' ]; then printf %s ' + shlex.quote(empty + ("Edit search  Esc Close" if session_picker else "Edit search  Esc Back") + new_hint) +
                      '; else printf %s ' + shlex.quote(empty + "/ Search  Esc Close" + new_hint) + '; fi' +
                      '; elif [ "$FZF_PROMPT" = ' + shlex.quote(search_prompt) +
                      ' ]; then printf %s ' + shlex.quote(search_footer) + '; else ' + footer_command + '; fi')
@@ -148,14 +163,17 @@ def _fzf_options(prompt, navigation=True, delete_command=None, footer=None):
         bindings += [key + ":transform@" + delete + "@" for key in ("d", "в")]
         escape = ('if [ "$FZF_ACTION" = change-list-label ]; then printf %s ' +
                   shlex.quote(normal) + '; else ' + escape + '; fi')
-    bindings += ["esc:transform@" + escape + "@", "start:" + (disarm if navigation else f"unbind({mode_keys})+{disarm}")]
-    if navigation:
+    if session_picker:
+        bindings += ["ctrl-o:" + normal]
+    bindings += [("esc:abort" if search_only or session_picker else "esc:transform@" + escape + "@"),
+                 "start:" + (disarm if navigation else f"unbind({mode_keys})+{disarm}")]
+    if navigation or prompt == "Sessions":
         bindings += ["result:transform-footer~" + result_footer + "~"]
     return ["--reverse", "--prompt=" + (normal_prompt if navigation else search_prompt),
-            "--bind=" + ",".join(bindings), "--ansi", "--highlight-line", "--padding=1,2",
-            "--pointer=▶", "--gutter= ", "--info=hidden", "--no-separator", "--header-first",
-            "--footer=" + footer, "--footer-border=top",
-            "--color=fg:#cad3f5,bg:#24273a,fg+:#ffffff,bg+:#5b6078,hl:#f5a97f,hl+:#f5a97f,"
+            "--bind=" + ",".join(bindings), "--ansi", "--padding=" + ("0,2" if search_only else "1,2"),
+            "--pointer=›", "--gutter= ", "--info=hidden", "--no-separator", "--header-first",
+            "--footer=" + (search_footer if prompt == "Sessions" and not navigation else footer), "--footer-border=top",
+            "--color=fg:#cad3f5,bg:#24273a,fg+:#ffffff:bold,bg+:#24273a,hl:#f5a97f,hl+:#f5a97f,"
             "header:#939ab7,footer:#939ab7,border:#494d64,pointer:#ffffff,prompt:#cad3f5,spinner:#a6da95"
             ] + (["--no-input"] if navigation else [])
 
@@ -220,22 +238,26 @@ def _rows(records, errors, config, mode="All", include_hidden=False):
                  "Ended" if rec.source == "ended" else
                  "Connected" if rec.state.startswith("open here") else "Checking" if rec.source == "cached" else "Ready")
         host = "Local" if rec.host_id == "local" else rec.host_label
-        host_text = _fit(" " + host, _columns()[0])
+        host = _fit(host, min(12, _columns()[0] // 2)).rstrip()
+        host_text = " " + host + "/"
         display_name = tmux.clean(rec.name)
         first = next(_glyphs(display_name), "")
         if first and ord(first[0]) >= 0x1f000 and len(display_name) > len(first) and not display_name[len(first)].isspace():
             display_name = first + " " + display_name[len(first):]
         if is_current:
-            display_name = _fit(display_name, _columns()[1] - 2).rstrip() + " *"
-        label = _table_row(" " + host, display_name, rec.windows, state)
-        label = _paint(host_text, "#24273a", host_colors.get(rec.host_id, "#939ab7")) + label[len(host_text):]
+            display_name = _fit(display_name, _columns()[0] - _width(host_text) - 2).rstrip() + " *"
+        label = _table_row(" " + host, display_name, str(rec.windows) + "w", state)
+        before_status, status_text = label.rsplit("  ", 1)
+        label = (_paint(" " + host, host_colors.get(rec.host_id, "#939ab7")) + _paint("/", "#8087a2") + before_status[len(host_text):] +
+                 "  " + _paint(status_text, STATUS_COLOURS[state]))
         result.append(rec.id + "\t" + label)
     for host, error in errors.items():
         if mode == "Local" and host != "local" or mode == "Remote" and host == "local":
             continue
         if host not in visible_hosts:
-            result.append("error:" + host + "\t" + _table_row(host_labels.get(host, "Local" if host == "local" else host),
-                                                              "Host unavailable (Ctrl-r retries)", "—", "Offline"))
+            label = _table_row(host_labels.get(host, "Local" if host == "local" else host),
+                               "Host unavailable (Ctrl-r retries)", "—", "Offline")
+            result.append("error:" + host + "\t" + label[:-len("Offline")] + _paint("Offline", STATUS_COLOURS["Offline"]))
     return result
 
 
@@ -259,8 +281,11 @@ def _write_snapshot(path, records, errors, config):
     mode = _mode(path.parent)
     lines = _rows(records, errors, config, mode["filter"], mode["hidden"])
     payload = b"\0".join(x.encode("utf-8") for x in lines) + (b"\0" if lines else b"")
-    _atomic(path, payload)
+    changed = not path.exists() or path.read_bytes() != payload
+    if changed:
+        _atomic(path, payload)
     _atomic(path.parent / "metadata.json", json.dumps({"records": [r.__dict__ for r in records], "errors": errors}, ensure_ascii=False).encode())
+    return changed
 
 
 def state_action(root, action):
@@ -303,7 +328,7 @@ def details(root, ident):
 def help_text():
     chooser = tmux.run(["show-options", "-gqv", "@tmux-roam-chooser-keys"], check=False).stdout.split() or ["s"]
     native = tmux.run(["show-options", "-gqv", "@tmux-roam-native-keys"], check=False).stdout.split() or ["S"]
-    print("j/k move · g/G first/last · Ctrl-u/d half page · / or i search · Esc back/close · q close")
+    print("Ctrl-o navigation · j/k move · g/G first/last · Ctrl-u/d half page · / or i search · Esc close · q close")
     print("Enter open · Ctrl-r refresh · Ctrl-f filter · Ctrl-h hidden sessions")
     print("dd delete session (вв in Russian) · Ctrl-n new remote session · Tab details · F1 help · F2 actions")
     print(f"Alt+a {chooser[0]} toggles this popup; Alt+ф with the Russian chooser key works too.")
@@ -318,7 +343,7 @@ def mode_header(root):
     scope = {"All": "All hosts", "Local": "This machine", "Remote": "Remote hosts"}[mode["filter"]]
     if mode["hidden"]:
         scope += "  (including hidden sessions)"
-    return scope + "\n\n" + _table_row(" Host", "Session", "Windows", "Status") + "\n "
+    return scope + "\n\n" + _table_row("", " Project", "Win", "Status") + "\n "
 
 
 def select_action(root, ident):
@@ -530,7 +555,38 @@ def _post(sock_path, action):
         pass
 
 
-def pick(config, client):
+def _popup_fzf(command, snapshot, config, client, size, *, search=False, pane=None):
+    """Render prepared rows directly, with no second Python startup in the popup."""
+    selected = snapshot.parent / "selected"
+    launch = shlex.join(["env", "-u", "FZF_DEFAULT_OPTS", "-u", "FZF_DEFAULT_OPTS_FILE",
+                         "-u", "FZF_DEFAULT_COMMAND", *command])
+    launch += " < " + shlex.quote(str(snapshot)) + " > " + shlex.quote(str(selected))
+    if search and pane:
+        from . import native
+        # The popup consumes input while open; keep the underlying tree ready
+        # for the first key immediately after Escape dismisses the overlay.
+        launch = shlex.join(tmux.args() + ["switch-client", "-c", client, "-T", native.BROWSE_TABLE]) + "; " + launch
+    command = launch + "; tmux_roam_exit_code=$?; " + (
+        "if [ $tmux_roam_exit_code -gt 1 ] && [ $tmux_roam_exit_code -ne 130 ]; then "
+        "printf '\\nPress Enter to continue.'; read _; fi; exit $tmux_roam_exit_code")
+    args = ["display-popup", "-c", client, "-E", "-w", size[0], "-h", size[1],
+            "-T", " Search sessions " if search else " Sessions ", "-b", "rounded",
+            "-s", "bg=#24273a,fg=#cad3f5", "-S", "fg=#494d64",
+            "-e", "TMUX_ROAM_CONFIG=" + str(config.path)]
+    if search and pane:
+        args += ["-t", pane, "-x", "P", "-y", "P"]
+    for key in ("TMUX_ROAM_CLIENT", "TMUX_ROAM_COLUMNS", "TMUX_ROAM_SSH_CONFIG"):
+        if key in os.environ:
+            args += ["-e", key + "=" + os.environ[key]]
+    result = subprocess.run(tmux.args() + args + [command], stdin=subprocess.DEVNULL)
+    if result.returncode == 129:  # The toggle closed the overlay, including nested menus.
+        raise EOFError
+    if result.returncode not in (0, 1, 130):
+        raise RuntimeError("cannot open tmux popup or fzf failed")
+    return subprocess.CompletedProcess(command, result.returncode, selected.read_bytes() if selected.exists() else b"")
+
+
+def pick(config, client, *, search=False, popup=None, pane=None):
     os.environ["TMUX_ROAM_CLIENT"] = client
     os.environ["TMUX_ROAM_COLUMNS"] = str(shutil.get_terminal_size((96, 24)).columns)
     with tempfile.TemporaryDirectory(prefix="picker-", dir=runtime_dir()) as directory:
@@ -540,6 +596,12 @@ def pick(config, client):
         sock = root / "fzf.sock"
         _atomic(root / "mode.json", json.dumps({"filter": "All", "hidden": False}).encode())
         records, errors = inventory.all_records(config, refresh=False)
+        if popup:
+            # Match the usual lower-half tree preview, retaining a few tree
+            # rows even when the terminal is too short for a native preview.
+            size = ((str(popup[0]), str(min(popup[1] - 3, max(8, (popup[1] + 1) // 2)))) if search else
+                    popup_size(config, *popup, len(records)))
+            os.environ["TMUX_ROAM_COLUMNS"] = str(int(size[0]) - 2)
         _write_snapshot(snapshot, records, errors, config)
         current_session, current_remote = _current_target()
         current = next((r.id for r in records if r.id == current_remote or
@@ -563,9 +625,9 @@ def pick(config, client):
                     errors["local"] = local_error
                 else:
                     errors.pop("local", None)
-                _write_snapshot(snapshot, records, errors, config)
+                changed = _write_snapshot(snapshot, records, errors, config)
                 rows_by_id = {rec.id: rec for rec in records if rec.source != "ended"}
-            if not closed.is_set():
+            if changed and not closed.is_set():
                 _post(sock, f"reload-sync(cat {snapshot})")
             with concurrent.futures.ThreadPoolExecutor(max_workers=config.concurrency) as pool:
               futures = {pool.submit(inventory.remote, host, config, True, closed): host for host in config.hosts if host.enabled}
@@ -589,11 +651,16 @@ def pick(config, client):
                         errors.pop(host.id, None)
                         inventory.save(host, remote_rows)
                     rows_by_id = {rec.id: rec for rec in records if rec.source != "ended"}
-                    _write_snapshot(snapshot, records, errors, config)
-                if not closed.is_set():
+                    changed = _write_snapshot(snapshot, records, errors, config)
+                if changed and not closed.is_set():
                     _post(sock, f"reload-sync(cat {snapshot})")
 
         def refresh():
+            # Publish refreshes only after fzf can receive them. The initial
+            # cached rows are already complete and ready for its first frame.
+            while not sock.exists():
+                if closed.wait(.01):
+                    return
             refresh_once()
             while not closed.is_set():
                 for _ in range(config.refresh_seconds * 5):
@@ -611,21 +678,24 @@ def pick(config, client):
         binary = str(Path(__file__).resolve().parent.parent / "bin" / "tmux-roam")
         base = binary + " picker-state " + str(root)
         created = "+transform(test -f " + str(root / "created.json") + " && printf accept)"
-        command = ["fzf", "--read0", "--print0", "--delimiter=\t", "--with-nth=2..", "--id-nth=1",
-                   "--track", "--no-multi", "--no-sort", "--no-clear", "--listen=" + str(sock),
-                   "--header=" + mode_header(root),
-                   *_fzf_options("Sessions", delete_command=binary + " delete-session " + str(root) + " {1}"),
+        command = ["fzf", "--sync", "--read0", "--print0", "--delimiter=\t", "--with-nth=2..", "--id-nth=1",
+                   "--track", "--no-multi", *([] if search else ["--no-sort"]), "--no-clear", "--listen=" + str(sock),
+                   "--header=" + (_table_row("", " Project", "Win", "Status") if search else mode_header(root)),
+                   *_fzf_options("Sessions", navigation=False, search_only=search,
+                                 delete_command=None if search else binary + " delete-session " + str(root) + " {1}"),
                    "--preview=" + binary + " details " + str(root) + " {1}",
-                   "--preview-window=down:40%" + ("" if config.details else ":hidden"),
+                   "--preview-window=down:40%" + ("" if config.details and not search else ":hidden"),
                    "--bind=load:pos(" + str(initial_position) + ")+unbind(load),enter:transform(" + binary + " picker-select " + str(root) + " {1}),"
-                   "tab:toggle-preview,ctrl-r:execute-silent(" + base + " refresh),"
-                   "ctrl-f:reload-sync(" + base + " filter)+transform-header(" + binary + " picker-header " + str(root) + "),"
+                   "tab:toggle-preview,ctrl-r:execute-silent(" + base + " refresh)"]
+        if not search:
+            command += ["--bind=ctrl-f:reload-sync(" + base + " filter)+transform-header(" + binary + " picker-header " + str(root) + "),"
                    "ctrl-h:reload-sync(" + base + " hidden)+transform-header(" + binary + " picker-header " + str(root) + "),"
                    "f1:execute(" + binary + " help),"
                    "ctrl-n:execute(" + binary + " new-session " + str(root) + ")" + created + ","
                    "f2:execute(" + binary + " actions " + str(root) + " {1})" + created]
         try:
-            result = subprocess.run(command, input=snapshot.read_bytes(), stdout=subprocess.PIPE, env=env)
+            result = (_popup_fzf(command, snapshot, config, client, size, search=search, pane=pane) if popup else
+                      subprocess.run(command, input=snapshot.read_bytes(), stdout=subprocess.PIPE, env=env))
         finally:
             closed.set()
             worker.join()

@@ -8,6 +8,7 @@ import re
 import shlex
 import subprocess
 import threading
+import time
 import uuid
 from dataclasses import asdict
 
@@ -19,21 +20,59 @@ LABEL = "@tmux-roam-label"
 WINDOWS = "@tmux-roam-windows"
 STATUS = "@tmux-roam-status"
 NAME = "@tmux-roam-name"
+HINT = "@tmux-roam-hint"
+ACCENT = "@tmux-roam-accent"
+WINDOW_ID = "@tmux-roam-window-id"
+WINDOW_OWNER = "@tmux-roam-window-owner"
+CARRIER_INDEX = "@tmux-roam-carrier-index"
 
-LOCAL_FORMAT = ("#{?session_format,#{session_windows} windows"
-                "#{?session_attached, (attached),},"
+# The tree owns the name column. Pad its details using terminal cell widths,
+# including wide Unicode names; long names retain a single separating space.
+ROW_PAD = "#{R: ,#{e|-|:22,#{w:session_name}}} "
+CURRENT = "#{?#{==:#{session_id},@CURRENT@},  #[bold]*#[default],}"
+LOCAL_FORMAT = ("#{?session_format," + ROW_PAD + "#{session_windows}w" + CURRENT + ","
                 "#{?window_format,#{window_name}#{window_flags},"
                 "#{pane_current_command}}}")
-REMOTE_FORMAT = ("#{?session_format,#{@tmux-roam-windows} remote windows"
-                 " · #{@tmux-roam-status},remote terminal · #{@tmux-roam-status}}")
+REMOTE_COLOUR = "#[fg=#{?#{m:Unavailable*,#{@tmux-roam-hint}},#8087a2,#{@tmux-roam-accent}}]"
+STATUS_FOREGROUND = picker.STATUS_COLOURS["Ready"]
+for _state in ("Connected", "Reconnect", "Checking", "Connecting", "Unavailable", "Ended"):
+    STATUS_FOREGROUND = ("#{?#{m:" + _state + "*,#{@tmux-roam-hint}}," +
+                         picker.STATUS_COLOURS[_state] + "," + STATUS_FOREGROUND + "}")
+STATUS_COLOUR = "#[fg=" + STATUS_FOREGROUND + "]"
+REMOTE_FORMAT = ("#{?session_format," + ROW_PAD +
+                 "#[fg=#{?#{m:Unavailable*,#{@tmux-roam-hint}},#8087a2,#939ab7}]#{@tmux-roam-windows}w  " +
+                 STATUS_COLOUR + "#{@tmux-roam-hint}#[default]" + CURRENT + "," +
+                 REMOTE_COLOUR + "#{?#{@tmux-roam-window-id},#{window_name}"
+                 "#{?#{@tmux-roam-window-active}, * ,  },}" + STATUS_COLOUR + "#{@tmux-roam-hint}#[default]}")
 TREE_FORMAT = "#{?#{@tmux-roam-owner}," + REMOTE_FORMAT + "," + LOCAL_FORMAT + "}"
+# Gutters keep the selected row away from the terminal edges. Right alignment
+# lets tmux place the trailing gutter correctly after a terminal resize.
+SEARCH_FORMAT = ("#[bg=#24273a]   #[default]#{?#{@tmux-roam-owner}," + REMOTE_COLOUR + ",}"
+                 "#{session_name}#[default]" + TREE_FORMAT + "#[align=right,bg=#24273a]   ")
+BROWSE_TABLE = "roam-native-browse"
+SEARCH_TABLE = "roam-native-search"
+TREE_FILTER = "#{!=:#{@tmux-roam-window-carrier},1}"
 
 
 def _option(session, name):
     return tmux.run(["show-options", "-qv", "-t", session, name], check=False).stdout.strip()
 
 
+def _hint(record, status):
+    if "unavailable" in status:
+        age = max(0, int(time.time() - record.observed))
+        seen = ("just now" if age < 60 else f"{age // 60}m ago" if age < 3600 else
+                f"{age // 3600}h ago" if age < 86400 else f"{age // 86400}d ago")
+        return "Unavailable · seen " + seen
+    return {"connected": "Connected", "connecting": "Connecting…", "disconnected": "Reconnect",
+            "available": "Ready", "cached": "Checking…", "ended": "Ended"}.get(status, "Checking…")
+
+
 def decorate(session, record, status):
+    session_record = asdict(record)
+    # Window metadata lives in the cache and window rows. Keep session metadata
+    # compatible with earlier plugin versions and their selection commands.
+    session_record.pop("window_details", None)
     label = tmux.clean(f"{record.host_label} / {record.name}")
     # Labels are data, including when tmux later parses display styles.
     label = label.replace("#", "＃")
@@ -50,8 +89,12 @@ def decorate(session, record, status):
             tmux.run(["rename-session", "-t", session, name])
         if previous != name:
             tmux.run(["set-option", "-t", session, NAME, name])
-    for option, value in ((RECORD, json.dumps(asdict(record))), (LABEL, label),
-                          (WINDOWS, str(record.windows)), (STATUS, status)):
+    accent = tmux.run(["show-options", "-gqv", "@tmux-roam-native-colour-" + record.host_id], check=False).stdout.strip()
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", accent):
+        accent = "#8aadf4"
+    for option, value in ((RECORD, json.dumps(session_record)), (LABEL, label),
+                          (WINDOWS, str(record.windows)), (STATUS, status),
+                          (HINT, _hint(record, status)), (ACCENT, accent)):
         old = _option(session, option)
         if option == RECORD and old:
             try:
@@ -91,12 +134,139 @@ def _placeholder(record):
         raise
 
 
+def _window_option(target, name):
+    return tmux.run(["show-options", "-wqv", "-t", target, name], check=False).stdout.strip()
+
+
+def _window_entries(session):
+    rows = tmux.run(["list-windows", "-t", session, "-F",
+                     "#{window_id}|#{window_index}|#{pane_id}|#{@tmux-roam-window-owner}|#{@tmux-roam-window-id}"],
+                    check=False).stdout.splitlines()
+    return [line.split("|", 4) for line in rows if len(line.split("|", 4)) == 5]
+
+
+def _remove_window(session, entry):
+    """Delete only our unchanged, exited display window; never a user's work."""
+    wid, _, pane, owner, remote_id = entry
+    guard = "1"
+    for key, value in (("session_id", session), ("window_id", wid), ("pane_id", pane),
+                       ("window_panes", "1"), ("window_linked", "0"), ("pane_dead", "1"),
+                       (WINDOW_OWNER, owner), (WINDOW_ID, remote_id)):
+        guard = "#{&&:" + guard + ",#{==:#{" + key + "}," + value + "}}"
+    for condition in ("#{==:#{window_name},#{@tmux-roam-window-name}}",
+                      "#{==:#{pane_start_command},#{@tmux-roam-window-command}}",
+                      "#{==:#{pane_dead_time},#{@tmux-roam-window-exit}}",
+                      "#{||:#{==:#{session_attached},0},#{==:#{window_active},0}}"):
+        guard = "#{&&:" + guard + "," + condition + "}"
+    tmux.run(["if-shell", "-F", "-t", pane, guard, "kill-window -t " + wid], check=False)
+
+
+def remove_windows(session):
+    """Called under the remote identity lock before carrier reuse or cleanup."""
+    for entry in _window_entries(session):
+        if entry[3] and re.fullmatch(r"@[0-9]+", entry[4]):
+            _remove_window(session, entry)
+    entries = _window_entries(session)
+    occupied = {entry[1] for entry in entries}
+    for wid, index, _, _, _ in entries:
+        original = _window_option(wid, CARRIER_INDEX)
+        if not original.isdigit():
+            continue
+        tmux.run(["set-option", "-wu", "-t", wid, "@tmux-roam-window-carrier"], check=False)
+        # Restore our reserved index only if it has not been changed by the user.
+        reserved = _window_option(wid, "@tmux-roam-carrier-reserved")
+        if index == reserved and original in occupied:
+            continue  # A preserved, modified display window still occupies it.
+        if index == reserved and original != index:
+            tmux.run(["move-window", "-s", session + ":" + wid, "-t", session + ":" + original], check=False)
+        for option in (CARRIER_INDEX, "@tmux-roam-carrier-reserved"):
+            tmux.run(["set-option", "-wu", "-t", wid, option], check=False)
+    previous = _option(session, "@tmux-roam-windows-renumber")
+    if previous and not any(entry[3] for entry in entries):
+        command = (["set-option", "-u", "-t", session, "renumber-windows"] if previous == "inherit" else
+                   ["set-option", "-t", session, "renumber-windows", previous])
+        tmux.run(command, check=False)
+        tmux.run(["set-option", "-u", "-t", session, "@tmux-roam-windows-renumber"], check=False)
+
+
+def sync_windows(session, record):
+    """Mirror window metadata as dormant local rows, keeping one SSH carrier."""
+    if tmux.run(["show-options", "-gqv", "@tmux-roam-native-windows"], check=False).stdout.strip() != "on":
+        remove_windows(session)
+        return
+    if not record.window_details:
+        return  # An old cache or racing snapshot cannot prove windows ended.
+    entries = _window_entries(session)
+    carriers = [entry for entry in entries if not entry[3]]
+    if len(carriers) != 1:
+        return  # User-created windows are not ours to rearrange.
+    carrier, original, _, _, _ = carriers[0]
+    if not _window_option(carrier, CARRIER_INDEX):
+        remote_indexes = {window["index"] for window in record.window_details}
+        reserved = max(999999, max(remote_indexes) + 1)
+        if not _option(session, "@tmux-roam-windows-renumber"):
+            tmux.run(["set-option", "-t", session, "@tmux-roam-windows-renumber",
+                      _option(session, "renumber-windows") or "inherit"])
+        tmux.run(["set-option", "-t", session, "renumber-windows", "off"])
+        tmux.run(["set-option", "-w", "-t", carrier, CARRIER_INDEX, original])
+        tmux.run(["set-option", "-w", "-t", carrier, "@tmux-roam-carrier-reserved", str(reserved)])
+        if original != str(reserved):
+            tmux.run(["move-window", "-s", session + ":" + carrier, "-t", session + ":" + str(reserved)])
+    wanted = {window["id"]: window for window in record.window_details}
+    for entry in entries:
+        if entry[3] and (entry[3] != record.id or entry[4] not in wanted or
+                         entry[1] != str(wanted[entry[4]]["index"])):
+            _remove_window(session, entry)
+    entries = _window_entries(session)
+    existing = {entry[4]: entry for entry in entries if entry[3] == record.id}
+    occupied = {entry[1] for entry in entries}
+    for remote in record.window_details:
+        name = tmux.clean(remote["name"]).replace("#", "＃")
+        entry = existing.get(remote["id"])
+        if entry is None:
+            index = str(remote["index"])
+            if index in occupied:
+                continue  # Preserve modified or unrelated windows occupying this index.
+            result = tmux.run(["new-window", "-d", "-P", "-F", "#{window_id}|#{pane_id}",
+                               "-t", session + ":" + index, "-n", name, "/bin/sleep", "infinity"])
+            wid, pane = result.stdout.strip().split("|")
+            for option, value in ((WINDOW_OWNER, record.id), (WINDOW_ID, remote["id"]),
+                                  ("@tmux-roam-window-name", name), ("remain-on-exit", "on"),
+                                  ("remain-on-exit-format", ""), ("automatic-rename", "off")):
+                tmux.run(["set-option", "-w", "-t", wid, option, value])
+            preview = "Remote window\n\nSelect this window to open its terminal.\n"
+            tmux.run(["respawn-pane", "-k", "-t", pane, "/usr/bin/printf", "%s", preview])
+            command = tmux.run(["display-message", "-p", "-t", pane, "#{pane_start_command}"]).stdout.strip()
+            tmux.run(["set-option", "-w", "-t", wid, "@tmux-roam-window-command", command])
+            for _ in range(20):
+                stamp = tmux.run(["display-message", "-p", "-t", pane, "#{pane_dead_time}"]).stdout.strip()
+                if stamp.isdigit():
+                    break
+                time.sleep(.01)
+            tmux.run(["set-option", "-w", "-t", wid, "@tmux-roam-window-exit", stamp])
+            occupied.add(index)
+        else:
+            wid, _, pane, _, _ = entry
+            previous = _window_option(wid, "@tmux-roam-window-name")
+            current = tmux.run(["display-message", "-p", "-t", wid, "#{window_name}"]).stdout.strip()
+            if current == previous and current != name:
+                tmux.run(["rename-window", "-t", wid, name])
+                tmux.run(["set-option", "-w", "-t", wid, "@tmux-roam-window-name", name])
+        active = "1" if remote["active"] else ""
+        if _window_option(wid, "@tmux-roam-window-active") != active:
+            tmux.run(["set-option", "-w", "-t", wid, "@tmux-roam-window-active", active])
+    if (any(entry[3] == record.id for entry in _window_entries(session)) and
+            _window_option(carrier, "@tmux-roam-window-carrier") != "1"):
+        tmux.run(["set-option", "-w", "-t", carrier, "@tmux-roam-window-carrier", "1"])
+
+
 def remove_inactive(session, identity, *, ended=False):
     """Prune dormant entries, or unused failed connections confirmed absent remotely."""
     if ended and connection._read_state(_option(session, connection.STATE)).get("status") != "idle":
         return connection.remove_disconnected(session, identity, ended=True)
     with (connection.runtime_dir() / ("target-" + identity + ".lock")).open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        remove_windows(session)
         token = _option(session, connection.STATE)
         state = connection._read_state(token)
         pane = state.get("pane", "")
@@ -141,6 +311,9 @@ def sync_host(host, records, *, fresh=False, error=None):
                     owned = [(sid, record.id)]
                 for sid, _ in owned:
                     if not fresh and not error and _option(sid, RECORD):
+                        if _option(sid, HINT) != "Checking…":
+                            tmux.run(["set-option", "-t", sid, HINT, "Checking…"])
+                        sync_windows(sid, record)
                         continue  # Opening a cached tree must not rewrite live metadata.
                     state = connection._read_state(_option(sid, connection.STATE))
                     status = {"open": "connected", "preparing": "connecting", "attaching": "connecting",
@@ -148,7 +321,10 @@ def sync_host(host, records, *, fresh=False, error=None):
                               "available" if fresh else "cached")
                     if error:
                         status += " · host unavailable"
+                    elif fresh and state.get("status") == "open" and not record.state.startswith("open here"):
+                        status = "disconnected"  # No remote client confirms the cached open state.
                     decorate(sid, record, status)
+                    sync_windows(sid, record)
         if fresh or error:
             for sid, identity in connection._owned_sessions():
                 if inventory.decode_identity(identity)[0] != host.id or identity in present:
@@ -159,12 +335,17 @@ def sync_host(host, records, *, fresh=False, error=None):
                 status = "host unavailable" if error else "ended"
                 if _option(sid, STATUS) != status:
                     tmux.run(["set-option", "-t", sid, STATUS, status])
+                hint = "Unavailable" if error else "Ended"
+                if _option(sid, HINT) != hint:
+                    tmux.run(["set-option", "-t", sid, HINT, hint])
         return before != _view()
 
 
 def _view():
-    return tmux.run(["list-sessions", "-F",
-                     "#{session_id}|#{session_name}|#{@tmux-roam-windows}|#{@tmux-roam-status}"]).stdout
+    return tmux.run(["list-windows", "-a", "-F",
+                     "#{session_id}|#{session_name}|#{@tmux-roam-windows}|#{@tmux-roam-status}|"
+                     "#{@tmux-roam-hint}|#{@tmux-roam-accent}|#{window_id}|#{window_name}|"
+                     "#{@tmux-roam-window-active}"]).stdout
 
 
 def _client_pane(client):
@@ -172,7 +353,42 @@ def _client_pane(client):
     return next((row.rsplit("|", 1)[1] for row in rows if row.rsplit("|", 1)[0] == client), None)
 
 
-def binding(config, binary, client=None, pane=None):
+def navigation_bindings(config, binary):
+    """Client-local mode tables leave ordinary terminal input untouched."""
+    desired = []
+    # tmux resets a non-repeating client table before running its binding.
+    # Replay through the session's default table when the mode has closed.
+    fallback = "send-keys -K"
+    for table, mode in ((BROWSE_TABLE, "tree-mode"), (SEARCH_TABLE, "switch-mode")):
+        active = "#{==:#{pane_mode}," + mode + "}"
+        forward = ("if-shell -F '#{mouse_pane}' 'send-keys -M' 'send-keys' ; if-shell -F " +
+                   shlex.quote(active) + " " + shlex.quote("switch-client -T " + table))
+        desired.append((table, "Any", ["if-shell", "-F", active, forward, fallback]))
+        # A prefix still reaches the local/remote routing table while browsing.
+        for key in ("M-a", "M-ф"):
+            desired.append((table, key, ["send-keys", "-K", key]))
+    for key, direction in (("о", "Down"), ("л", "Up")):
+        # Translate only tree navigation; search fields keep literal text.
+        command = "send-keys " + direction + " ; switch-client -T " + BROWSE_TABLE
+        desired.append((BROWSE_TABLE, key, ["if-shell", "-F", "#{==:#{pane_mode},tree-mode}",
+                                           command, fallback]))
+    for key in ("/", "."):  # Physical slash on the Russian layout.
+        if tmux.run(["show-options", "-gqv", "@tmux-roam-native-search"], check=False).stdout.strip() == "fzf":
+            from . import integration
+            opening = integration._popup(binary, config, "popup --search --pane '#{pane_id}'")
+        else:
+            opening = binding(config, binary, fuzzy=True, searchable=True)
+        command = " ".join(shlex.quote(arg) if arg != "\\;" else ";" for arg in opening)
+        desired.append((BROWSE_TABLE, key, ["if-shell", "-F", "#{==:#{pane_mode},tree-mode}", command,
+                                           fallback]))
+    command = " ".join(shlex.quote(arg) if arg != "\\;" else ";"
+                       for arg in binding(config, binary, searchable=True))
+    desired.append((SEARCH_TABLE, "Escape", ["if-shell", "-F", "#{==:#{pane_mode},switch-mode}", command,
+                                            fallback]))
+    return desired
+
+
+def binding(config, binary, client=None, pane=None, *, fuzzy=False, searchable=False, toggle=False):
     """Build native commands; opening and local selection never wait for a process."""
     command = ["env", "TMUX_ROAM_CONFIG=" + str(config.path)]
     if os.environ.get("TMUX_ROAM_SSH_CONFIG"):
@@ -187,24 +403,44 @@ def binding(config, binary, client=None, pane=None):
                 " } { switch-client -c '@CLIENT@' -t \"%1%\" }")
     refresh = (shlex.join(command + ["native-refresh"]) +
                " --client '@CLIENT@' --navigation '@TOKEN@' --pane '@PANE@'")
-    commands = (shlex.join(["choose-tree", "-Zs", "-t", "@PANE@", "-F", TREE_FORMAT, template]) +
+    chooser = (["switch-mode", "-Zs", "-t", "@PANE@", "-F", SEARCH_FORMAT, template] if fuzzy else
+               ["choose-tree", "-Zs", "-O", "index", "-t", "@PANE@", "-f", TREE_FILTER, "-F", TREE_FORMAT, template])
+    picker_active = "#{||:#{==:#{pane_mode},tree-mode},#{==:#{pane_mode},switch-mode}}"
+    close_mode = ["if-shell", "-F", "-t", "@PANE@", picker_active,
+                  "send-keys -t @PANE@ Escape"]
+    commands = (shlex.join(close_mode) + " ; " + shlex.join(chooser) +
+                (" ; " + shlex.join(["switch-client", "-c", "@CLIENT@", "-T", SEARCH_TABLE if fuzzy else BROWSE_TABLE])
+                 if searchable else "") +
                 " ; run-shell -b " + shlex.quote(refresh))
     # run-shell -C executes tmux commands without a shell process. Freeze the
     # invoking client and token now; defer row/pane formats until selection.
-    commands = commands.replace("#", "##").replace("@CLIENT@", client or "#{client_name}")
+    # Style introducers survive format expansion unchanged; doubling them would
+    # render literal #[...] text. Row expressions still need one deferred pass.
+    commands = commands.replace("#", "##").replace("##[", "#[").replace("@CLIENT@", client or "#{client_name}")
     commands = commands.replace("@TOKEN@", "#{@tmux-roam-generation}").replace("@PANE@", pane or "#{pane_id}")
-    return ["set-option", "-gF", "@tmux-roam-generation",
-            "#{e|+|:#{?@tmux-roam-generation,#{@tmux-roam-generation},0},1}", "\\;",
-            "set-option", "-gF", picker._navigation_option(client or "#{client_name}"),
-            "#{@tmux-roam-generation}", "\\;", "run-shell", "-C", commands]
+    commands = commands.replace("@CURRENT@", "#{session_id}")
+    opening = ["set-option", "-gF", "@tmux-roam-generation",
+               "#{e|+|:#{?@tmux-roam-generation,#{@tmux-roam-generation},0},1}", "\\;",
+               "set-option", "-gF", picker._navigation_option(client or "#{client_name}"),
+               "#{@tmux-roam-generation}", "\\;", "run-shell", "-C", "-t", pane or "#{pane_id}", commands]
+    if toggle:
+        return ["if-shell", "-F", picker_active, "send-keys Escape",
+                " ".join(shlex.quote(arg) if arg != "\\;" else ";" for arg in opening)]
+    return opening
 
 
-def open_tree(config, client, binary):
+def open_tree(config, client, binary, *, searchable=False):
     # The CLI joins the invoking client's command queue; key bindings use this
     # same native command sequence directly.
     pane = _client_pane(client)
     if pane:
-        tmux.run([";" if arg == "\\;" else arg for arg in binding(config, binary, client, pane)])
+        tmux.run([";" if arg == "\\;" else arg
+                  for arg in binding(config, binary, client, pane, searchable=searchable)])
+
+
+def close_tree(pane):
+    tmux.run(["if-shell", "-F", "-t", pane, "#{==:#{pane_mode},tree-mode}",
+              shlex.join(["send-keys", "-t", pane, "Escape"])], check=False)
 
 
 def refresh(config, client, pane, token):
@@ -216,7 +452,7 @@ def refresh(config, client, pane, token):
     def active():
         return (not closed.is_set() and picker.navigation_valid(client, token) and
                 _client_pane(client) == pane and
-                tmux.run(["display-message", "-p", "-t", pane, "#{pane_mode}"], check=False).stdout.strip() == "tree-mode")
+                tmux.run(["display-message", "-p", "-t", pane, "#{pane_mode}"], check=False).stdout.strip() in ("tree-mode", "switch-mode"))
 
     def redraw(changed):
         if changed and active():
@@ -280,6 +516,9 @@ def select(config, client, target, navigation):
         if not host:
             raise RuntimeError("remote host is disabled or no longer configured")
         tmux.run(["display-message", "-c", client, f"Connecting to {tmux.clean(record.host_label)}/{tmux.clean(record.name)}…"])
-        connection.open_remote(record, host, config, client, navigation)
+        remote_window = _window_option(target, WINDOW_ID)
+        if remote_window and _window_option(target, WINDOW_OWNER) != record.id:
+            raise RuntimeError("remote window changed; reopen the picker")
+        connection.open_remote(record, host, config, client, navigation, window=remote_window or None)
     finally:
         picker.end_navigation(client, navigation)

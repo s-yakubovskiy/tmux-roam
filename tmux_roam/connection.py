@@ -137,6 +137,8 @@ def remove_disconnected(session, identity, *, ended=False):
                    _read_state(tmux.run(["show-options", "-qv", "-t", sid, STATE], check=False).stdout.strip()).get("status") == "open"
                    for sid, ident in _owned_sessions()):
             return False
+        from . import native
+        native.remove_windows(session)
         pane = _managed_pane(session, identity, token)
         if pane is None or pane["session_attached"] != "0":
             return False
@@ -223,13 +225,33 @@ def delete_session(record, config):
                 native.remove_inactive(session, identity, ended=True)
 
 
-def open_remote(record, host, config, client, navigation_token=None):
+def _select_remote_window(record, host, config, window):
+    if not re.fullmatch(r"@[0-9]+", window):
+        raise RuntimeError("invalid remote window ID")
+    pid, started = record.generation.split("/")
+    target = record.session_id + ":" + window
+    guard = "1"
+    for key, value in (("pid", pid), ("start_time", started), ("session_id", record.session_id),
+                       ("session_created", str(record.created)), ("window_id", window)):
+        guard = "#{&&:" + guard + ",#{==:#{" + key + "}," + value + "}}"
+    command = ["if-shell", "-F", "-t", target, guard,
+               shlex.join(["select-window", "-t", target]), "display-message -p TMUX_ROAM_STALE_WINDOW"]
+    code, stdout, stderr, failure = inventory.capture_bounded(
+        inventory.ssh_base(host, config) + [shlex.join(host.tmux_args() + command)], config.command_timeout_seconds)
+    if failure or code or b"TMUX_ROAM_STALE_WINDOW" in stdout:
+        raise RuntimeError(failure or tmux.clean(stderr.decode("utf-8", "replace").strip())[:500] or
+                           "Remote window ended or changed; refresh the picker")
+
+
+def open_remote(record, host, config, client, navigation_token=None, *, window=None):
     snapshot, error = inventory.remote_snapshot(host, config, True)
     if error:
         raise RuntimeError(f"{host.label}: {error}")
     fresh = snapshot.records
     if record.id not in {row.id for row in fresh}:
         raise RuntimeError(f"{host.label}: session ended or server restarted; refresh the picker")
+    if window and not any(w["id"] == window for row in fresh if row.id == record.id for w in row.window_details or []):
+        raise RuntimeError(f"{host.label}: window ended or moved; refresh the picker")
     inventory.save(host, fresh)
     prefix = snapshot.prefixes[record.session_id] if host.remote_prefix == "auto" else host.remote_prefix
     if prefix not in ("M-a", "C-b", "None"):
@@ -245,6 +267,8 @@ def open_remote(record, host, config, client, navigation_token=None):
             for sid, identity in _owned_sessions():
                 if identity != record.id:
                     continue
+                from . import native
+                native.remove_windows(sid)
                 existing_token = tmux.run(["show-options", "-v", "-t", sid, STATE], check=False).stdout.strip()
                 state = _read_state(existing_token)
                 status = state.get("status")
@@ -314,6 +338,10 @@ def open_remote(record, host, config, client, navigation_token=None):
                 raise RuntimeError("invoking client disappeared or navigation was cancelled")
             from . import native
             native.decorate(local_id, next(row for row in fresh if row.id == record.id), "connected")
+            if window:
+                _select_remote_window(record, host, config, window)
+                if not _navigation_current(client, navigation_token):
+                    raise RuntimeError("navigation cancelled or superseded")
             tmux.switch(client, local_id)
             return local_id
     deadline = time.monotonic() + config.command_timeout_seconds + config.connect_timeout_seconds + 3
@@ -331,6 +359,10 @@ def open_remote(record, host, config, client, navigation_token=None):
                         raise RuntimeError("invoking client disappeared or navigation was cancelled")
                     from . import native
                     native.decorate(local_id, next(row for row in confirmed.records if row.id == record.id), "connected")
+                    if window:
+                        _select_remote_window(record, host, config, window)
+                        if not _navigation_current(client, navigation_token):
+                            raise RuntimeError("navigation cancelled or superseded")
                     tmux.switch(client, local_id)
                     return local_id
             if state.get("status") in ("error", "disconnected"):

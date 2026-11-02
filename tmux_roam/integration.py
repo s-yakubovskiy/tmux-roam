@@ -1,4 +1,5 @@
 """Install only owned tmux bindings; preserve user bindings for safe unload."""
+import fcntl
 import hashlib
 import json
 import os
@@ -29,6 +30,12 @@ def _bind(table, key, command):
     tmux.run(["bind-key", "-T", table, key] + command)
 
 
+def _canonical_binding(binding):
+    # list-keys realigns its columns as keys are added or removed from a table.
+    return re.sub(r"^(bind-key\s+(?:-r\s+)?-T\s+\S+\s+\S+)\s+",
+                  lambda match: " ".join(match[1].split()) + " ", binding)
+
+
 def _popup(binary, config, command="popup"):
     env = "TMUX_ROAM_CONFIG=" + shlex.quote(str(config.path))
     if os.environ.get("TMUX_ROAM_SSH_CONFIG"):
@@ -50,10 +57,12 @@ def _routing_commands(popup, chooser, native, native_command):
         desired.append((root, "Any", ["send-keys"]))
         for key in ("WheelUpPane", "WheelDownPane"):
             desired.append((root, key, ["send-keys", "-M"]))
+        for key in ("L", "Д"):
+            desired.append((routed, key, ["switch-client", "-l"]))
         for key in chooser:
             desired.append((routed, key, popup))
         for key in native:
-            desired.append((routed, key, native_command))
+            desired.append((routed, key, native_command[key]))
         desired.append((routed, "Any", ["send-keys", remote_prefix, "\\;", "send-keys"] if remote_prefix else ["send-keys"]))
     desired.append(("roam-escape", "Any", ["send-keys"]))
     return desired
@@ -73,7 +82,7 @@ def _keys(name, default):
 
 def _restore(item):
     table, key = item["table"], item["key"]
-    if _binding(table, key) != item["installed"]:
+    if _canonical_binding(_binding(table, key)) != _canonical_binding(item["installed"]):
         return False
     original = item["original"]
     if original:
@@ -91,19 +100,34 @@ def _restore(item):
 
 def install(binary):
     config = load()
+    if _option("@tmux-roam-native", "off") != "on" or _option("@tmux-roam-native-windows", "off") != "on":
+        from . import connection
+        for session, identity in connection._owned_sessions():
+            with (runtime_dir() / ("target-" + identity + ".lock")).open("w") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                native_picker.remove_windows(session)
     path = _state_file()
     old = json.loads(path.read_text()) if path.exists() else {"bindings": []}
     remembered = {(b["table"], b["key"]): b for b in old["bindings"]}
     popup = _popup(binary, config)
     chooser = _keys("@tmux-roam-chooser-keys", "s ы")
     native = _keys("@tmux-roam-native-keys", "S Ы")
-    native_command = native_picker.binding(config, binary) if _option("@tmux-roam-native", "off") == "on" else ["choose-tree", "-Zs"]
+    fuzzy = set(_option("@tmux-roam-native-fuzzy-keys", "").split())
+    if (fuzzy and _option("@tmux-roam-native-search", "native") != "fzf" and
+            not any(line.startswith("switch-mode ") for line in tmux.run(["list-commands"]).stdout.splitlines())):
+        fuzzy = set()  # Older tmux keeps the native tree on the same keys.
+    native_command = {key: native_picker.binding(config, binary, searchable=key in fuzzy, toggle=True)
+                      if _option("@tmux-roam-native", "off") == "on" else ["choose-tree", "-Zs"] for key in native}
     desired = [("prefix", key, popup) for key in chooser]
-    desired += [("prefix", key, native_command) for key in native]
+    desired += [("prefix", key, native_command[key]) for key in native]
+    desired += [("prefix", key, ["switch-client", "-l"]) for key in ("L", "Д")]
     for table in _keys("@tmux-roam-extra-tables", "off-prefix"):
         if tmux.run(["list-keys", "-T", table], check=False).stdout.strip():
             desired += [(table, key, popup) for key in chooser]
+            desired += [(table, key, ["switch-client", "-l"]) for key in ("L", "Д")]
     desired += _routing_commands(popup, chooser, native, native_command)
+    if fuzzy and _option("@tmux-roam-native", "off") == "on":
+        desired += native_picker.navigation_bindings(config, binary)
     current_keys = {(table, key) for table, key, _ in desired}
     for pair, item in list(remembered.items()):
         if pair not in current_keys:
@@ -114,7 +138,7 @@ def install(binary):
         previous = _binding(table, key)
         if (table, key) not in remembered:
             remembered[(table, key)] = {"table": table, "key": key, "original": previous}
-        elif previous != remembered[(table, key)].get("installed"):
+        elif _canonical_binding(previous) != _canonical_binding(remembered[(table, key)].get("installed", "")):
             continue  # A later user edit owns this key now.
         _bind(table, key, command)
         remembered[(table, key)]["installed"] = _binding(table, key)

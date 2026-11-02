@@ -3,6 +3,7 @@ import concurrent.futures
 import hashlib
 import json
 import os
+import re
 import shlex
 import selectors
 import signal
@@ -18,6 +19,8 @@ from .config import Host
 SCHEMA = 1
 MAX_OUTPUT = 1024 * 1024
 CLIENT_MARKER = "TMUX_ROAM_CLIENTS_V1"
+WINDOW_MARKER = "TMUX_ROAM_WINDOWS_V1"
+WINDOW_FORMAT = "#{session_id}|#{window_id}|#{window_index}|#{window_active}|#{window_name}"
 
 
 def cache_dir():
@@ -55,6 +58,7 @@ class Record:
     observed: float
     source: str
     state: str = ""
+    window_details: list[dict] | None = None
 
 
 @dataclass
@@ -172,7 +176,9 @@ def remote_snapshot(host: Host, config, reconcile=False, cancel=None):
                 (["display-message", "-p", "#{pid}" + tmux.SEP + "#{start_time}" + tmux.SEP + "#{socket_path}"],
                  ["list-sessions", "-F", tmux.FORMAT + "|#{prefix}"])]
     commands += ["printf '%s\\n' " + CLIENT_MARKER,
-                 "LC_ALL=C.UTF-8 " + shlex.join(host.tmux_args() + ["list-clients", "-F", tmux.CLIENT_FORMAT])]
+                 "LC_ALL=C.UTF-8 " + shlex.join(host.tmux_args() + ["list-clients", "-F", tmux.CLIENT_FORMAT]),
+                 "printf '%s\\n' " + WINDOW_MARKER,
+                 "LC_ALL=C.UTF-8 " + shlex.join(host.tmux_args() + ["list-windows", "-a", "-F", WINDOW_FORMAT])]
     cmd = "sh -c " + shlex.quote(" && ".join(commands))
     code, stdout, stderr, failure = capture_bounded(ssh_base(host, config) + [cmd], config.command_timeout_seconds,
                                                   cancel=cancel)
@@ -189,6 +195,10 @@ def remote_snapshot(host: Host, config, reconcile=False, cancel=None):
             raise ValueError("missing client records")
         marker = output.index(CLIENT_MARKER)
         session_lines, client_lines = output[:marker], output[marker + 1:]
+        if WINDOW_MARKER not in client_lines:
+            raise ValueError("missing window records")
+        marker = client_lines.index(WINDOW_MARKER)
+        client_lines, window_lines = client_lines[:marker], client_lines[marker + 1:]
         entries = []
         prefixes = {}
         for line in session_lines:
@@ -207,6 +217,18 @@ def remote_snapshot(host: Host, config, reconcile=False, cancel=None):
                 raise ValueError("invalid client record")
             clients[(int(parts[0]), parts[1])] = parts[2]
         records = _records(host.id, host.label, server, entries, "live")
+        by_session = {record.session_id: record for record in records}
+        for record in records:
+            record.window_details = []
+        for line in window_lines:
+            parts = line.split(tmux.SEP, 4)
+            if (len(parts) != 5 or not re.fullmatch(r"\$[0-9]+", parts[0]) or
+                    not re.fullmatch(r"@[0-9]+", parts[1]) or not parts[2].isdigit() or parts[3] not in ("0", "1")):
+                raise ValueError("invalid window record")
+            record = by_session.get(parts[0])
+            if record is not None:  # A session may be created between the two listings.
+                record.window_details.append(dict(id=parts[1], index=int(parts[2]), active=parts[3] == "1",
+                                                  name=tmux.clean(parts[4])))
         _reconcile(host, records, clients, reconcile)
         return RemoteSnapshot(records, clients, prefixes), None
     except (UnicodeError, ValueError, IndexError) as exc:
@@ -259,6 +281,7 @@ def cached(host):
         for row in result:
             row.source = "cached"
             row.state = ""
+            row.window_details = data.get("windows", {}).get(row.id, row.window_details)
         return result
     except (OSError, ValueError, KeyError, TypeError):
         return []
@@ -268,10 +291,18 @@ def save(host, records):
     path = _cache_path(host)
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     tmp = path.with_suffix(f".{os.getpid()}.tmp")
+    rows, windows = [], {}
+    for record in records:
+        row = asdict(record)
+        details = row.pop("window_details")
+        rows.append(row)
+        if details is not None:
+            windows[record.id] = details
     try:
         with tmp.open("w") as file:
             os.chmod(tmp, 0o600)
-            json.dump(dict(schema=SCHEMA, host_id=host.id, records=[asdict(r) for r in records]), file)
+            # Keep record dictionaries readable by pre-window plugin versions.
+            json.dump(dict(schema=SCHEMA, host_id=host.id, records=rows, windows=windows), file)
         os.replace(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
