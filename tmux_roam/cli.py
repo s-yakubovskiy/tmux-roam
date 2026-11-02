@@ -9,7 +9,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from . import VERSION, connection, integration, inventory, picker, tmux
+from . import VERSION, config_sync, connection, integration, inventory, native, picker, tmux
 from .config import ConfigError, load
 
 BIN = str(Path(__file__).resolve().parent.parent / "bin" / "tmux-roam")
@@ -47,6 +47,16 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("pick")
     p.add_argument("--client")
+    p = sub.add_parser("native", help="open the native tmux session tree with remote entries")
+    p.add_argument("--client")
+    p = sub.add_parser("native-select", help=argparse.SUPPRESS)
+    p.add_argument("--client", required=True)
+    p.add_argument("--navigation", required=True)
+    p.add_argument("--target", required=True)
+    p = sub.add_parser("native-refresh", help=argparse.SUPPRESS)
+    p.add_argument("--client", required=True)
+    p.add_argument("--navigation", required=True)
+    p.add_argument("--pane", required=True)
     p = sub.add_parser("popup", help=argparse.SUPPRESS)
     p.add_argument("--client", required=True)
     p = sub.add_parser("picker-state", help=argparse.SUPPRESS)
@@ -64,6 +74,12 @@ def main(argv=None):
     p = sub.add_parser("actions", help=argparse.SUPPRESS)
     p.add_argument("directory")
     p.add_argument("opaque_id")
+    p = sub.add_parser("new-session", help=argparse.SUPPRESS)
+    p.add_argument("directory")
+    p.add_argument("opaque_id", nargs="?", default="")
+    p = sub.add_parser("delete-session", help=argparse.SUPPRESS)
+    p.add_argument("directory")
+    p.add_argument("opaque_id")
     p = sub.add_parser("list")
     p.add_argument("--json", action="store_true")
     p.add_argument("--cached", action="store_true")
@@ -76,7 +92,11 @@ def main(argv=None):
     p = sub.add_parser("integrate", help=argparse.SUPPRESS)
     p.add_argument("action", choices=["install", "unload"])
     p = sub.add_parser("config")
-    p.add_argument("action", choices=["check"])
+    p.add_argument("action", choices=["check", "diff", "sync"])
+    group = p.add_mutually_exclusive_group()
+    group.add_argument("host_id", nargs="?")
+    group.add_argument("--all", action="store_true", dest="all_hosts")
+    p.add_argument("--source", help="shared tmux config (default: ~/.tmux.conf)")
     p = sub.add_parser("supervise", help=argparse.SUPPRESS)
     p.add_argument("token")
     p.add_argument("host_id")
@@ -85,6 +105,10 @@ def main(argv=None):
     try:
         config = load()
         if args.command == "config":
+            if args.action != "check":
+                return config_sync.execute(config, args.action, args.host_id, args.all_hosts, args.source)
+            if args.host_id or args.all_hosts or args.source:
+                raise ValueError("config check validates config.toml; use config diff or config sync for tmux.conf")
             print(f"OK: {config.path} ({len(config.hosts)} hosts)")
         elif args.command == "list":
             rows, errors = inventory.all_records(config, refresh=not args.cached)
@@ -125,7 +149,7 @@ def main(argv=None):
                 version = subprocess.run(["fzf", "--version"], capture_output=True, text=True).stdout.strip()
                 help_text = subprocess.run(["fzf", "--help"], capture_output=True, text=True).stdout
                 print("fzf version:", version)
-                for option in ("--id-nth", "--track", "--listen", "--read0"):
+                for option in ("--id-nth", "--track", "--listen", "--read0", "--no-input", "--footer"):
                     if option not in help_text:
                         print(f"fzf missing required option: {option}")
                         bad = True
@@ -144,6 +168,13 @@ def main(argv=None):
                 print(f"installed {integration.install(BIN)} chooser bindings")
             else:
                 print(f"restored {integration.unload()} chooser bindings")
+        elif args.command == "native":
+            args.client = _client(args.client)
+            native.open_tree(config, args.client, BIN)
+        elif args.command == "native-select":
+            native.select(config, args.client, args.target, args.navigation)
+        elif args.command == "native-refresh":
+            native.refresh(config, args.client, args.pane, args.navigation)
         elif args.command == "pick":
             client = _client(args.client)
             token = picker.begin_navigation(client)
@@ -171,14 +202,20 @@ def main(argv=None):
                 tmux.run(["choose-tree", "-Zs", "-t", dimensions[3]])
                 return 0
             binary = BIN
-            command = (f"{shlex.quote(binary)} pick --client {shlex.quote(client)}; status=$?; "
-                       "if [ $status -ne 0 ]; then printf '\\nPress Enter to continue.'; read _; fi")
-            popup_args = ["display-popup", "-c", client, "-E", "-w", config.width, "-h", config.height,
+            width, height = config.width, config.height
+            if dimensions:
+                cached, _ = inventory.all_records(config, refresh=False)
+                width, height = picker.popup_size(config, int(dimensions[1]), int(dimensions[2]), len(cached))
+            command = (f"{shlex.quote(binary)} pick --client {shlex.quote(client)}; tmux_roam_exit_code=$?; "
+                       "if [ $tmux_roam_exit_code -ne 0 ]; then printf '\\nPress Enter to continue.'; read _; fi")
+            popup_args = ["display-popup", "-c", client, "-E", "-w", width, "-h", height,
+                          "-T", " Sessions ", "-b", "rounded", "-s", "bg=#24273a,fg=#cad3f5", "-S", "fg=#494d64",
                           "-e", "TMUX_ROAM_CONFIG=" + str(config.path)]
             if os.environ.get("TMUX_ROAM_SSH_CONFIG"):
                 popup_args += ["-e", "TMUX_ROAM_SSH_CONFIG=" + os.environ["TMUX_ROAM_SSH_CONFIG"]]
             result = subprocess.run(tmux.args() + popup_args + [command], stdin=subprocess.DEVNULL)
-            if result.returncode:
+            # display-popup -C intentionally hangs up its job when toggling closed.
+            if result.returncode not in (0, 128 + signal.SIGHUP):
                 raise RuntimeError("cannot open tmux popup")
         elif args.command == "picker-state":
             picker.state_action(args.directory, args.action)
@@ -192,6 +229,10 @@ def main(argv=None):
             picker.help_text()
         elif args.command == "actions":
             picker.actions(args.directory, args.opaque_id, config)
+        elif args.command == "new-session":
+            picker.new_session(args.directory, args.opaque_id, config)
+        elif args.command == "delete-session":
+            picker.delete_session(args.directory, args.opaque_id, config)
         elif args.command == "open":
             client = _client(args.client)
             rows, _ = inventory.all_records(config, refresh=False)
@@ -209,7 +250,12 @@ def main(argv=None):
                 raise RuntimeError("cached session identity missing")
             connection.supervise(args.token, host, record, config)
         return 0
+    except (EOFError, KeyboardInterrupt):
+        return 0
     except (ConfigError, tmux.TmuxError, RuntimeError, ValueError) as exc:
+        if args.command in ("native", "native-select", "native-refresh") and args.client:
+            tmux.run(["display-message", "-c", args.client, "tmux-roam: " + tmux.clean(str(exc))], check=False)
+            return 0
         print(f"tmux-roam: {exc}", file=sys.stderr)
         return 2
 

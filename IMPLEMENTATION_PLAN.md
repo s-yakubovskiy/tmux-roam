@@ -155,13 +155,14 @@ Managed remote sessions automatically use a plugin-owned key table. Normal termi
 | `Alt+a s` / `Alt+ф ы` | Combined local/remote picker |
 | `Alt+a S` / `Alt+ф Ы` | Native local tmux chooser |
 | `Alt+a`, then another tmux command key | Forward the detected remote prefix followed by that key |
-| Local prefix pressed twice | Send exactly one remote prefix; the following key goes directly to the remote tmux |
+| Local prefix pressed twice | Send two remote prefixes, preserving the remote double-prefix binding |
+| `Alt+a F12`, then a command key | Send one remote prefix, then forward the following key directly to the remote tmux |
 
-For example, `Alt+a Alt+a s` opens the remote native session chooser. It does not send two remote prefixes. This escape sequence also makes the reserved `s` command available remotely.
+For example, `Alt+a F12 s` opens the remote native session chooser. Double `Alt+a` retains Omni's `last-window` binding instead of consuming it as an escape sequence.
 
 Read the selected remote session's actual `prefix` option; support remote `M-a` and `C-b` without changing remote configuration. Account explicitly for `prefix None` and for a prefix changed while connected. Allow an explicit per-host override when auto-detection is unsuitable.
 
-This automatically routed mode applies only to plugin-owned connection sessions. The user's current double-prefix `last-window`, F12 and `v/м` behavior remains in ordinary local sessions. In managed remote sessions, F12 is forwarded to the remote terminal by default; manual outer passthrough is unnecessary. Document this difference in help and the managed-session status indicator.
+This automatically routed mode applies only to plugin-owned connection sessions. The user's current double-prefix `last-window`, F12 and `v/м` behavior remains in ordinary local sessions. In managed remote sessions, double-prefix follows the remote binding; F12 on its own is forwarded to the remote terminal. Manual outer passthrough is unnecessary. Document this difference in help and the managed-session status indicator.
 
 For this workstation, also bind the combined picker into the existing `off-prefix` table, so it remains reachable from legacy passthrough mode. Preserve the existing `v`, `м` and `Any` handlers there. Detect conflicts and record exactly which bindings the plugin owns.
 

@@ -3,4 +3,4 @@ TMUX_ROAM_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TMUX_ROAM_PYTHON=${TMUX_ROAM_PYTHON:-/usr/bin/python3}
 PYTHONPATH="$TMUX_ROAM_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 export PYTHONPATH
-exec "$TMUX_ROAM_PYTHON" -m tmux_roam.cli "$@"
+exec "$TMUX_ROAM_PYTHON" -P -m tmux_roam.cli "$@"

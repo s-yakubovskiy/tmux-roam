@@ -1,5 +1,6 @@
 import base64
 import concurrent.futures
+import hashlib
 import json
 import os
 import shlex
@@ -56,6 +57,13 @@ class Record:
     state: str = ""
 
 
+@dataclass
+class RemoteSnapshot:
+    records: list[Record]
+    clients: dict[tuple[int, str], str]
+    prefixes: dict[str, str]
+
+
 def _records(host_id, label, server, entries, source, observed=None):
     pid, started, socket = server
     generation = f"{pid}/{started}"
@@ -77,24 +85,30 @@ def local():
 
 
 def ssh_base(host, config, tty=False):
+    from .connection import runtime_dir
+
     result = ["ssh"]
-    if os.environ.get("TMUX_ROAM_SSH_CONFIG"):
-        result += ["-F", os.environ["TMUX_ROAM_SSH_CONFIG"]]
+    ssh_config = os.environ.get("TMUX_ROAM_SSH_CONFIG", "")
+    if ssh_config:
+        result += ["-F", ssh_config]
+    profile = hashlib.sha256((host.ssh + "\0" + ssh_config).encode()).hexdigest()[:8]
+    control = str(runtime_dir() / ("ssh-" + profile + "-%C"))
+    # OpenSSH appends a temporary suffix when binding the Linux Unix socket.
+    # Long custom runtime paths still work, with ordinary SSH connections.
+    if len(os.fsencode(control.replace("%C", "0" * 40))) <= 90:
+        result += ["-o", "ControlMaster=auto", "-o", "ControlPersist=60",
+                   "-o", "ControlPath=" + control]
     return result + ["-o", "BatchMode=yes", "-o", f"ConnectTimeout={config.connect_timeout_seconds}",
             "-o", "ConnectionAttempts=1", "-o", "RemoteCommand=none",
             "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3",
             "-tt" if tty else "-T", "--", host.ssh]
 
 
-def _remote_command(host, commands):
-    # OpenSSH sends a command string to the remote login shell. Quote every argument.
-    command = " && ".join("LC_ALL=C.UTF-8 " + shlex.join(host.tmux_args() + cmd) for cmd in commands)
-    return "sh -c " + shlex.quote(command)
-
-
-def capture_bounded(command, timeout, output_limit=MAX_OUTPUT, error_limit=8192):
+def capture_bounded(command, timeout, output_limit=MAX_OUTPUT, error_limit=8192, cancel=None, input_file=None):
+    if cancel is not None and cancel.is_set():
+        return None, b"", b"", "command cancelled"
     try:
-        proc = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        proc = subprocess.Popen(command, stdin=input_file if input_file is not None else subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, start_new_session=True)
     except OSError as exc:
         return None, b"", b"", str(exc)
@@ -106,11 +120,14 @@ def capture_bounded(command, timeout, output_limit=MAX_OUTPUT, error_limit=8192)
     failure = None
     try:
         while selector.get_map():
+            if cancel is not None and cancel.is_set():
+                failure = "command cancelled"
+                break
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 failure = f"command timed out after {timeout}s"
                 break
-            for key, _ in selector.select(min(remaining, .2)):
+            for key, _ in selector.select(min(remaining, .1)):
                 block = os.read(key.fileobj.fileno(), 65536)
                 if not block:
                     selector.unregister(key.fileobj)
@@ -136,6 +153,13 @@ def capture_bounded(command, timeout, output_limit=MAX_OUTPUT, error_limit=8192)
                 pass
             proc.wait()
             failure = failure or "command did not exit"
+    except BaseException:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.wait()
+        raise
     finally:
         selector.close()
         proc.stdout.close()
@@ -143,18 +167,19 @@ def capture_bounded(command, timeout, output_limit=MAX_OUTPUT, error_limit=8192)
     return proc.returncode, bytes(out), bytes(err), failure
 
 
-def remote(host: Host, config, reconcile=False):
+def remote_snapshot(host: Host, config, reconcile=False, cancel=None):
     commands = ["LC_ALL=C.UTF-8 " + shlex.join(host.tmux_args() + args) for args in
                 (["display-message", "-p", "#{pid}" + tmux.SEP + "#{start_time}" + tmux.SEP + "#{socket_path}"],
-                 ["list-sessions", "-F", tmux.FORMAT])]
+                 ["list-sessions", "-F", tmux.FORMAT + "|#{prefix}"])]
     commands += ["printf '%s\\n' " + CLIENT_MARKER,
                  "LC_ALL=C.UTF-8 " + shlex.join(host.tmux_args() + ["list-clients", "-F", tmux.CLIENT_FORMAT])]
     cmd = "sh -c " + shlex.quote(" && ".join(commands))
-    code, stdout, stderr, failure = capture_bounded(ssh_base(host, config) + [cmd], config.command_timeout_seconds)
+    code, stdout, stderr, failure = capture_bounded(ssh_base(host, config) + [cmd], config.command_timeout_seconds,
+                                                  cancel=cancel)
     if failure:
-        return [], failure
+        return None, failure
     if code:
-        return [], tmux.clean(stderr.decode("utf-8", "replace").strip())[:500] or f"SSH exit {code}"
+        return None, tmux.clean(stderr.decode("utf-8", "replace").strip())[:500] or f"SSH exit {code}"
     try:
         output = stdout.decode("utf-8", "strict").splitlines()
         server = output.pop(0).split(tmux.SEP, 2)
@@ -165,30 +190,36 @@ def remote(host: Host, config, reconcile=False):
         marker = output.index(CLIENT_MARKER)
         session_lines, client_lines = output[:marker], output[marker + 1:]
         entries = []
+        prefixes = {}
         for line in session_lines:
             head = line.split(tmux.SEP, 2)
-            parts = head[:2] + head[2].rsplit(tmux.SEP, 2) if len(head) == 3 else head
-            if (len(parts) != 5 or not parts[0].startswith("$") or not parts[0][1:].isdigit()
+            parts = head[:2] + head[2].rsplit(tmux.SEP, 3) if len(head) == 3 else head
+            if (len(parts) != 6 or not parts[0].startswith("$") or not parts[0][1:].isdigit()
                     or not all(x.isdigit() for x in (parts[1], parts[3], parts[4]))):
                 raise ValueError("invalid session record")
             entries.append(dict(session_id=parts[0], created=int(parts[1]),
                                 name=tmux.clean(parts[2]), windows=int(parts[3]), clients=int(parts[4])))
-        clients = []
+            prefixes[parts[0]] = parts[5]
+        clients = {}
         for line in client_lines:
             parts = line.split(tmux.SEP, 3)
             if len(parts) != 4 or not parts[0].isdigit() or not parts[2].startswith("$"):
                 raise ValueError("invalid client record")
-            clients.append(dict(pid=int(parts[0]), tty=parts[1], session_id=parts[2]))
+            clients[(int(parts[0]), parts[1])] = parts[2]
         records = _records(host.id, host.label, server, entries, "live")
         _reconcile(host, records, clients, reconcile)
-        return records, None
+        return RemoteSnapshot(records, clients, prefixes), None
     except (UnicodeError, ValueError, IndexError) as exc:
-        return [], f"malformed inventory from {host.id}: {exc}"
+        return None, f"malformed inventory from {host.id}: {exc}"
+
+
+def remote(host: Host, config, reconcile=False, cancel=None):
+    snapshot, error = remote_snapshot(host, config, reconcile, cancel)
+    return (snapshot.records if snapshot else []), error
 
 
 def _reconcile(host, records, clients, update):
     from . import connection
-    actual = {(c["pid"], c["tty"]): c["session_id"] for c in clients}
     by_session = {r.session_id: r for r in records}
     counts = {}
     try:
@@ -202,7 +233,7 @@ def _reconcile(host, records, clients, update):
                 continue
             token = tmux.run(["show-options", "-v", "-t", local_id, connection.STATE], check=False).stdout.strip()
             state = connection._read_state(token)
-            session = actual.get((state.get("pid"), state.get("tty")))
+            session = clients.get((state.get("pid"), state.get("tty")))
             target = by_session.get(session)
             if target:
                 counts[target.id] = counts.get(target.id, 0) + 1

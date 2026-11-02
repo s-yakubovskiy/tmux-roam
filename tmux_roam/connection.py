@@ -37,40 +37,6 @@ def _owned_sessions():
     return found
 
 
-def _remote_client(host, config, pid, tty):
-    command = inventory._remote_command(host, [["list-clients", "-F", tmux.CLIENT_FORMAT]])
-    try:
-        result = subprocess.run(inventory.ssh_base(host, config) + [command],
-                                stdin=subprocess.DEVNULL, capture_output=True,
-                                timeout=config.command_timeout_seconds)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if result.returncode:
-        return None
-    for line in result.stdout.decode("utf-8", "replace").splitlines():
-        parts = line.split(tmux.SEP)
-        if len(parts) == 4 and parts[0] == str(pid) and parts[1] == tty:
-            return parts[2]
-    return None
-
-
-def _prefix(host, config):
-    if host.remote_prefix != "auto":
-        return host.remote_prefix
-    command = inventory._remote_command(host, [["show-options", "-gv", "prefix"]])
-    try:
-        result = subprocess.run(inventory.ssh_base(host, config) + [command], stdin=subprocess.DEVNULL,
-                                capture_output=True, timeout=config.command_timeout_seconds)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise RuntimeError(f"cannot read remote prefix: {exc}") from exc
-    if result.returncode:
-        raise RuntimeError("cannot read remote prefix: " + result.stderr.decode("utf-8", "replace")[:300])
-    prefix = result.stdout.decode("ascii", "replace").strip()
-    if prefix not in ("M-a", "C-b", "None"):
-        raise RuntimeError(f"unsupported remote prefix: {prefix}")
-    return prefix
-
-
 def _state_path(token):
     return runtime_dir() / (token + ".json")
 
@@ -116,68 +82,240 @@ def _navigation_current(client, token):
     return picker.navigation_valid(client, token)
 
 
+def _managed_pane(session, identity, token):
+    """Identify an untouched carrier pane before replacing or removing it."""
+    fields = ("session_id", "session_attached", "session_windows", "window_panes",
+              "pane_id", "pane_pid", "pane_dead", "pane_dead_time", OWNER, IDENTITY, STATE)
+    rows = tmux.run(["list-panes", "-s", "-t", session, "-F",
+                     "|".join("#{" + key + "}" for key in fields) + "|#{pane_start_command}"], check=False).stdout.splitlines()
+    if len(rows) != 1:
+        return None
+    parts = rows[0].split("|", len(fields))
+    if len(parts) != len(fields) + 1:
+        return None
+    pane = dict(zip(fields, parts))
+    if (pane["session_id"] != session or pane["session_windows"] != "1" or pane["window_panes"] != "1" or
+            pane[OWNER] != "1" or pane[IDENTITY] != identity or pane[STATE] != token):
+        return None
+    try:
+        args = shlex.split(parts[-1])
+        if len(args) == 1:
+            args = shlex.split(args[0])
+        # Reconciliation may have moved this carrier to another session on
+        # the same remote server since its supervisor originally started.
+        if (args[-4:-1] != ["supervise", token, inventory.decode_identity(identity)[0]] or
+                inventory.decode_identity(args[-1])[:3] != inventory.decode_identity(identity)[:3]):
+            return None
+        if pane["pane_dead"] == "0":
+            process = Path("/proc", pane["pane_pid"], "cmdline").read_bytes().rstrip(b"\0").decode().split("\0")
+            if process[-4:] != args[-4:] or "tmux_roam.cli" not in process:
+                return None
+    except (OSError, ValueError, IndexError):
+        return None
+    return pane
+
+
+def _guarded_pane_command(pane, command):
+    guard = "1"
+    for key, value in pane.items():
+        guard = "#{&&:" + guard + ",#{==:#{" + key + "}," + value + "}}"
+    result = tmux.run(["if-shell", "-F", "-t", pane["pane_id"], guard, command,
+                       "display-message -p TMUX_ROAM_PANE_CHANGED"])
+    if "TMUX_ROAM_PANE_CHANGED" in result.stdout:
+        raise RuntimeError("Connection pane changed; select it again")
+
+
+def remove_disconnected(session, identity, *, ended=False):
+    """Prune an unused failed carrier after confirmed absence or a healthy duplicate."""
+    with (runtime_dir() / ("target-" + identity + ".lock")).open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        token = tmux.run(["show-options", "-qv", "-t", session, STATE], check=False).stdout.strip()
+        if _read_state(token).get("status") not in ("error", "disconnected"):
+            return False
+        # Discovery may have completed just before the healthy connection dropped.
+        if not ended and not any(sid != session and ident == identity and
+                   _read_state(tmux.run(["show-options", "-qv", "-t", sid, STATE], check=False).stdout.strip()).get("status") == "open"
+                   for sid, ident in _owned_sessions()):
+            return False
+        pane = _managed_pane(session, identity, token)
+        if pane is None or pane["session_attached"] != "0":
+            return False
+        # Removing a user-renamed entry is not automatic cleanup.
+        name = tmux.run(["display-message", "-p", "-t", session, "#{session_name}"], check=False).stdout.strip()
+        owned_name = tmux.run(["show-options", "-qv", "-t", session, "@tmux-roam-name"], check=False).stdout.strip()
+        if name != owned_name or _read_state(token).get("status") not in ("error", "disconnected"):
+            return False
+        _guarded_pane_command(pane, shlex.join([
+            "if-shell", "-F", "-t", pane["pane_id"], "#{==:#{session_name},#{@tmux-roam-name}}",
+            "kill-session -t " + session]))
+        return tmux.run(["has-session", "-t", session], check=False).returncode != 0
+
+
+def create_remote(host, config, name, directory):
+    """Explicitly create a detached session; ordinary attachment never creates one."""
+    if not name or name != name.strip() or tmux.clean(name) != name or any(c in name for c in ".:;"):
+        raise ValueError("Use a session name without leading/trailing spaces, dots, colons, semicolons or control characters")
+    if not directory or tmux.clean(directory) != directory or not (directory.startswith(("/", "~/")) or directory == "~"):
+        raise ValueError("Use an absolute remote directory or ~/path")
+    # cd before invoking tmux avoids interpreting the directory as a tmux format.
+    fields = "#{pid}|#{start_time}|#{session_id}|#{session_created}|#{socket_path}"
+    command = ("set -eu; directory=" + shlex.quote(directory) + "; "
+               "case \"$directory\" in '~') directory=$HOME;; '~/'*) directory=$HOME/${directory#'~/'};; esac; "
+               "cd -- \"$directory\"; export LC_ALL=C.UTF-8; exec " +
+               shlex.join(host.tmux_args() + ["new-session", "-d", "-P", "-F", fields, "-s", name]))
+    code, stdout, stderr, failure = inventory.capture_bounded(
+        inventory.ssh_base(host, config) + ["sh -c " + shlex.quote(command)], config.command_timeout_seconds)
+    if failure or code:
+        reason = failure or tmux.clean(stderr.decode("utf-8", "replace").strip())[:500] or f"SSH exit {code}"
+        raise RuntimeError(f"{host.label}: {reason}. Refresh the picker before retrying if the connection was lost.")
+    try:
+        pid, started, sid, created, socket = stdout.decode("utf-8", "strict").strip().split("|", 4)
+        if not pid.isdigit() or not started.isdigit() or not re.fullmatch(r"\$[0-9]+", sid) or not created.isdigit() or not socket.startswith("/"):
+            raise ValueError("invalid identity")
+        return inventory._records(host.id, host.label, (pid, started, socket),
+                                  [dict(session_id=sid, created=int(created), name=name, windows=1, clients=0)], "live")[0]
+    except (ValueError, UnicodeError):
+        raise RuntimeError(f"{host.label}: creation response was incomplete; refresh the picker before retrying") from None
+
+
+def delete_session(record, config):
+    """Delete only the explicitly confirmed server/session incarnation."""
+    host = None
+    if record.host_id == "local":
+        fresh, error = inventory.local()
+    else:
+        host = next((h for h in config.hosts if h.id == record.host_id and h.enabled), None)
+        if host is None:
+            raise RuntimeError("Host is disabled or no longer configured")
+        fresh, error = inventory.remote(host, config)
+    if error:
+        raise RuntimeError(error)
+    current = next((r for r in fresh if r.id == record.id), None)
+    if current is None:
+        raise RuntimeError("Session ended or server restarted; refresh the picker")
+    pid, started = current.generation.split("/")
+    # Evaluate the guard and kill in the same tmux command queue, without a shell
+    # between validation and deletion. Names never select the target.
+    guard = "1"
+    for key, value in (("pid", pid), ("start_time", started),
+                       ("session_id", current.session_id), ("session_created", str(current.created))):
+        guard = "#{&&:" + guard + ",#{==:#{" + key + "}," + value + "}}"
+    command = ["if-shell", "-F", "-t", current.session_id, guard,
+               shlex.join(["kill-session", "-t", current.session_id]),
+               "display-message -p TMUX_ROAM_STALE_SESSION"]
+    if host:
+        code, stdout, stderr, failure = inventory.capture_bounded(
+            inventory.ssh_base(host, config) + [shlex.join(host.tmux_args() + command)],
+            config.command_timeout_seconds)
+        if failure or code:
+            reason = failure or tmux.clean(stderr.decode("utf-8", "replace").strip())[:500] or f"SSH exit {code}"
+            raise RuntimeError(reason + ". Refresh to check the outcome before retrying.")
+        output = stdout.decode("utf-8", "replace")
+    else:
+        output = tmux.run(command).stdout
+    if "TMUX_ROAM_STALE_SESSION" in output:
+        raise RuntimeError("Session changed while deleting; refresh the picker")
+    if host:
+        inventory.save(host, [r for r in fresh if r.id != current.id])
+        from . import native
+        for session, identity in _owned_sessions():
+            if identity == current.id:
+                native.remove_inactive(session, identity, ended=True)
+
+
 def open_remote(record, host, config, client, navigation_token=None):
-    fresh, error = inventory.remote(host, config, True)
+    snapshot, error = inventory.remote_snapshot(host, config, True)
     if error:
         raise RuntimeError(f"{host.label}: {error}")
+    fresh = snapshot.records
     if record.id not in {row.id for row in fresh}:
         raise RuntimeError(f"{host.label}: session ended or server restarted; refresh the picker")
     inventory.save(host, fresh)
-    prefix = _prefix(host, config)
+    prefix = snapshot.prefixes[record.session_id] if host.remote_prefix == "auto" else host.remote_prefix
+    if prefix not in ("M-a", "C-b", "None"):
+        raise RuntimeError(f"unsupported remote prefix: {prefix}")
     lock_path = runtime_dir() / ("target-" + record.id + ".lock")
     owner = False
     local_id = None
     token = None
-    stale = set()
     while True:
         candidate = None
         with lock_path.open("w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             for sid, identity in _owned_sessions():
-                if identity != record.id or sid in stale:
+                if identity != record.id:
                     continue
                 existing_token = tmux.run(["show-options", "-v", "-t", sid, STATE], check=False).stdout.strip()
                 state = _read_state(existing_token)
-                if state.get("status") == "open":
+                status = state.get("status")
+                if status == "open" and snapshot.clients.get((state.get("pid"), state.get("tty"))) == record.session_id:
                     candidate = (sid, existing_token, "open", state)
                     break
-                if state.get("status") in ("preparing", "attaching") or not state:
+                if status in ("preparing", "attaching") or not state:
                     candidate = (sid, existing_token, "preparing", state)
-                    break
-            if candidate is None:
-                owner = True
-                token = uuid.uuid4().hex
+                elif candidate is None and status in ("idle", "error", "disconnected", "open"):
+                    candidate = (sid, existing_token, "idle" if status == "idle" else "retry", state)
+            if candidate is None or candidate[2] in ("idle", "retry"):
+                owner = candidate is None
+                token = uuid.uuid4().hex if owner or candidate[2] == "retry" else candidate[1]
                 name = _safe_name(host.id, record.name)
                 width, height = _client_size(client)
                 source_root = str(Path(__file__).resolve().parent.parent)
-                command = ["env", "PYTHONPATH=" + source_root,
+                command = ["exec", "env", "PYTHONPATH=" + source_root,
                            "TMUX_ROAM_CONFIG=" + str(config.path),
                            "TMUX_ROAM_SSH_CONFIG=" + os.environ.get("TMUX_ROAM_SSH_CONFIG", ""),
-                           sys.executable, "-m", "tmux_roam.cli",
+                           sys.executable, "-P", "-m", "tmux_roam.cli",
                            "supervise", token, host.id, record.id]
-                result = tmux.run(["new-session", "-d", "-P", "-F", "#{session_id}", "-x", width,
-                                   "-y", height, "-s", name + "-" + token[:6], shlex.join(command)])
-                local_id = result.stdout.strip()
+                if owner:
+                    result = tmux.run(["new-session", "-d", "-P", "-F", "#{session_id}", "-x", width,
+                                       "-y", height, "-s", name + "-" + token[:6], shlex.join(command)])
+                    local_id = result.stdout.strip()
+                else:
+                    local_id, previous_token, kind, state = candidate
+                    managed = _managed_pane(local_id, record.id, previous_token) if kind == "retry" else None
+                    pane = managed["pane_id"] if managed else state.get("pane", "")
+                    if kind == "retry":
+                        if managed is None:
+                            raise RuntimeError("Connection pane was modified; cannot safely reconnect it")
+                    else:
+                        actual = tmux.run(["display-message", "-p", "-t", pane, "#{session_id}|#{pane_dead}"]).stdout.strip()
+                        if not pane or actual != local_id + "|1":
+                            raise RuntimeError("remote placeholder was modified; reopen or remove that local entry")
+                    _write_state(token, {"status": "preparing"})
+                    try:
+                        if kind == "retry":
+                            _guarded_pane_command(managed,
+                                shlex.join(["respawn-pane", "-k", "-t", pane, shlex.join(command)]) + " ; " +
+                                shlex.join(["set-option", "-t", local_id, STATE, token]))
+                        else:
+                            tmux.run(["respawn-pane", "-t", pane, shlex.join(command)])
+                    except BaseException:
+                        if kind == "idle":
+                            _write_state(token, state)
+                        raise
                 tmux.run(["set-option", "-t", local_id, OWNER, "1"])
                 tmux.run(["set-option", "-t", local_id, IDENTITY, record.id])
                 tmux.run(["set-option", "-t", local_id, STATE, token])
                 tmux.run(["set-option", "-t", local_id, "@tmux-roam-prefix", prefix])
                 tmux.run(["set-option", "-t", local_id, "prefix", "None"])
                 tmux.run(["set-option", "-t", local_id, "key-table", _routing_table(prefix)])
-                tmux.run(["set-option", "-t", local_id, "status-left", "[roam #{session_name}] "])
+                # The remote tmux draws its own bar; the local carrier needs no extra row.
+                tmux.run(["set-option", "-t", local_id, "status", "off"])
                 break
         local_id, token, kind, state = candidate
         if kind == "preparing":
             break  # Observe the existing creation without holding its lock.
-        if _remote_client(host, config, state.get("pid"), state.get("tty")) == record.session_id:
+        if snapshot.clients.get((state.get("pid"), state.get("tty"))) == record.session_id:
             tmux.run(["set-option", "-t", local_id, "@tmux-roam-prefix", prefix])
             tmux.run(["set-option", "-t", local_id, "prefix", "None"])
             tmux.run(["set-option", "-t", local_id, "key-table", _routing_table(prefix)])
+            tmux.run(["set-option", "-t", local_id, "status", "off"])
             if not tmux.client_exists(client) or not _navigation_current(client, navigation_token):
                 raise RuntimeError("invoking client disappeared or navigation was cancelled")
+            from . import native
+            native.decorate(local_id, next(row for row in fresh if row.id == record.id), "connected")
             tmux.switch(client, local_id)
             return local_id
-        stale.add(local_id)
     deadline = time.monotonic() + config.command_timeout_seconds + config.connect_timeout_seconds + 3
     try:
         while time.monotonic() < deadline:
@@ -185,9 +323,14 @@ def open_remote(record, host, config, client, navigation_token=None):
                 raise RuntimeError("navigation cancelled or superseded")
             state = _read_state(token)
             if state.get("status") == "open":
-                if _remote_client(host, config, state.get("pid"), state.get("tty")) == record.session_id:
+                confirmed, error = inventory.remote_snapshot(host, config)
+                if not error and record.id not in {row.id for row in confirmed.records}:
+                    raise RuntimeError(f"{host.label}: session ended or server restarted; refresh the picker")
+                if not error and confirmed.clients.get((state.get("pid"), state.get("tty"))) == record.session_id:
                     if not tmux.client_exists(client) or not _navigation_current(client, navigation_token):
                         raise RuntimeError("invoking client disappeared or navigation was cancelled")
+                    from . import native
+                    native.decorate(local_id, next(row for row in confirmed.records if row.id == record.id), "connected")
                     tmux.switch(client, local_id)
                     return local_id
             if state.get("status") in ("error", "disconnected"):
@@ -246,7 +389,8 @@ def supervise(token, host, record, config):
                 proc.terminate()
             _write_state(token, {"status": "error", "error": str(exc)})
             print(f"\r\nConnection error: {exc}")
-        print("Enter: retry exact session · Alt+a s: choose another session")
+        chooser = tmux.run(["show-options", "-gqv", "@tmux-roam-chooser-keys"], check=False).stdout.split() or ["s"]
+        print(f"Enter: retry exact session · Alt+a {chooser[0]}: choose another session")
         try:
             input()
         except EOFError:
