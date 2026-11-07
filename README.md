@@ -2,6 +2,8 @@
 
 tmux-roam shows local tmux sessions and sessions on explicitly configured SSH hosts in tmux's native session tree or an fzf popup. Selecting a remote session opens a managed local tmux session that holds an SSH attachment to the existing remote session. It never runs `new-session -A` remotely.
 
+Development roadmap: [Go migration plan](GO_MIGRATION_PLAN.md), including full feature parity, performance targets, package boundaries, and verification checklists for every stage.
+
 This checkout is version **0.1.0**. It requires Linux, Python 3.11+, OpenSSH, tmux with `display-popup` and session `key-table`, and fzf with `--id-nth`, `--track`, `--read0`, `--listen`, `--no-input` and `--footer`. The isolated integration run covered local tmux 3.7c, remote tmux 3.6 and 3.7c, and fzf 0.74.4. A workstation rollout also verified tmux 3.8, fzf 0.74.5, zsh, and attachment to the actual Omni host; physical keyboard acceptance remains manual.
 
 ## Install
