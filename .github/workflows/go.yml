@@ -1,0 +1,17 @@
+name: Go migration checks
+on:
+  push:
+  pull_request:
+jobs:
+  read-only-slice:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Check Go slice
+        run: sh scripts/check-go.sh

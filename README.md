@@ -1,5 +1,7 @@
 # tmux-roam
 
+The Go migration is in progress. See [GO_MIGRATION_PROGRESS.md](GO_MIGRATION_PROGRESS.md) for implemented commands, verification, and remaining gates. The installed launcher still uses Python.
+
 tmux-roam shows local tmux sessions and sessions on explicitly configured SSH hosts in tmux's native session tree or an fzf popup. Selecting a remote session opens a managed local tmux session that holds an SSH attachment to the existing remote session. It never runs `new-session -A` remotely.
 
 Development roadmap: [Go migration plan](GO_MIGRATION_PLAN.md), including full feature parity, performance targets, package boundaries, and verification checklists for every stage.
