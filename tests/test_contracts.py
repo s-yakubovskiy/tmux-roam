@@ -828,17 +828,39 @@ class IsolatedTmuxContracts(unittest.TestCase):
                     os.write(fd, b"\x1b[<65;10;5M")
                     wait_for(lambda: int(remote_run("display-message", "-p", "#{scroll_position}") or "0") < position)
                     remote_run("send-keys", "-X", "cancel")
+            remote_run("new-window", "-t", "remote", "printf 'ROAM_MOUSE_WORD tail\\nsecond row\\n'; sleep 60")
+            wait_for(lambda: "ROAM_MOUSE_WORD" in remote_run("capture-pane", "-p"))
+            for suffix in ("ma", "cb", "none"):
+                with self.subTest(click_and_drag_routing=suffix):
+                    tmux.run(["set-option", "-t", "start", "key-table", "roam-root-" + suffix])
+                    time.sleep(.4)  # Start a fresh click sequence after the previous drag.
+                    remote_run("set-buffer", "pending")
+                    click = b"\x1b[<0;6;1M\x1b[<0;6;1m"
+                    os.write(fd, click)
+                    time.sleep(.05)
+                    os.write(fd, click)
+                    wait_for(lambda: remote_run("show-buffer") == "ROAM_MOUSE_WORD")
+                    time.sleep(.4)  # The following drag must not become a third click.
+                    remote_run("set-buffer", "pending")
+                    os.write(fd, b"\x1b[<0;1;1M\x1b[<32;5;1M\x1b[<32;16;1M")
+                    wait_for(lambda: remote_run("display-message", "-p", "#{pane_mode}|#{selection_present}") == "copy-mode|1")
+                    os.write(fd, b"\x1b[<0;16;1m")
+                    wait_for(lambda: remote_run("show-buffer") == "ROAM_MOUSE_WORD")
+                    self.assertEqual(tmux.run(["display-message", "-p", "-t", "start", "#{pane_mode}"]).stdout.strip(), "")
             mouse_log = Path(self.directory.name) / "mouse-events"
             program = ("import os, tty\ntty.setraw(0)\n"
-                       "os.write(1, b'\\x1b[?1049h\\x1b[?1000h\\x1b[?1006h')\n"
+                       "os.write(1, b'\\x1b[?1049h\\x1b[?1002h\\x1b[?1006h')\n"
                        "while True:\n"
                        " data = os.read(0, 1024)\n"
                        f" with open({str(mouse_log)!r}, 'ab') as out: out.write(data)\n")
             remote_run("new-window", "-t", "remote", sys.executable, "-c", program)
             wait_for(lambda: remote_run("display-message", "-p", "#{alternate_on}|#{mouse_any_flag}") == "1|1")
-            events = b"\x1b[<64;10;5M\x1b[<65;10;5M"
+            events = b"\x1b[<64;10;5M\x1b[<65;10;5M\x1b[<0;10;5M\x1b[<32;12;5M\x1b[<0;12;5m"
             os.write(fd, events)
             wait_for(lambda: mouse_log.exists() and b"[<64;" in mouse_log.read_bytes() and b"[<65;" in mouse_log.read_bytes())
+            wait_for(lambda: all(event in mouse_log.read_bytes() for event in (b"[<0;10;5M", b"[<32;12;5M", b"[<0;12;5m")))
+            os.write(fd, b"ROAM_KEYS_AFTER_CLICK")
+            wait_for(lambda: b"ROAM_KEYS_AFTER_CLICK" in mouse_log.read_bytes())
             received = mouse_log.read_bytes()
             tmux.run(["choose-tree", "-Zs", "-t", "start"])
             os.write(fd, events + b"\x1b")

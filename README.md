@@ -124,7 +124,7 @@ Within a managed remote connection, the configured native and fzf keys keep open
 
 Managed connections hide the local carrier's status bar so only the remote tmux bar takes screen space. The local session picker still identifies each connection by host and session name.
 
-Touchpad and mouse-wheel scrolling is forwarded through managed sessions to remote tmux. The remote tmux mouse bindings decide whether to scroll terminal history or pass the event to a full-screen application. Both tmux layers need mouse support enabled.
+Mouse events are forwarded through managed sessions to remote tmux, including touchpad scrolling, clicks, double-clicks and dragging. The remote tmux mouse bindings control pane selection, word selection on double-click, copying a dragged selection, and mouse input in full-screen applications. A plain shell does not move its text cursor on a single click. Both tmux layers need mouse support enabled.
 
 `Alt+a [` enters the remote server's copy mode, whose key style is independent of the local server. For vi navigation and copying back to your local terminal, put these settings in the remote `~/.tmux.conf`:
 

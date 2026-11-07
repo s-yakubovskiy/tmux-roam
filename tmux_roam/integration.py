@@ -54,9 +54,7 @@ def _routing_commands(popup, chooser, native, native_command):
             desired.append((routed, key, ["send-keys", remote_prefix, remote_prefix] if remote_prefix else ["switch-client", "-T", root]))
         if remote_prefix:
             desired.append((routed, "F12", ["send-keys", remote_prefix, "\\;", "switch-client", "-T", "roam-escape"]))
-        desired.append((root, "Any", ["send-keys"]))
-        for key in ("WheelUpPane", "WheelDownPane"):
-            desired.append((root, key, ["send-keys", "-M"]))
+        desired.append((root, "Any", ["if-shell", "-F", "#{mouse_pane}", "send-keys -M", "send-keys"]))
         for key in ("L", "Д"):
             desired.append((routed, key, ["switch-client", "-l"]))
         for key in chooser:
