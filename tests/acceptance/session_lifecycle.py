@@ -50,7 +50,8 @@ def main():
         wait_for(lambda: len(clients()) == 2)
         first, second = list(clients())
         origin = clients()[first]
-        _, data = call(GO, env, "list", "--json")
+        code, data = call(GO, env, "list", "--json")
+        assert code == 0, data
         record = next(r for r in data["sessions"] if r["name"] == "remote|Юникод")
         def opened(*extra):
             result = subprocess.run([str(GO), "open", record["id"], "--client", first, *extra],

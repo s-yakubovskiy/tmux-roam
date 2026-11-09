@@ -47,6 +47,7 @@ UsePAM no
 PermitRootLogin prohibit-password
 AllowUsers {user}
 LogLevel ERROR
+SetEnv PATH={Path(shutil.which('tmux')).resolve().parent}:/usr/bin:/bin
 """)
         if isolated_home:
             for name in ("home", "state", "tmp"):
