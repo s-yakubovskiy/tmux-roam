@@ -4,13 +4,19 @@ on:
   pull_request:
 jobs:
   runtime-and-release:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+      - name: Record native platform
+        run: uname -srm
       - name: Install acceptance dependencies
         run: |
           sudo apt-get update
@@ -40,5 +46,5 @@ jobs:
         run: sh scripts/fuzz-go.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: linux-release-candidates
+          name: linux-release-candidates-${{ runner.arch }}
           path: build/releases/

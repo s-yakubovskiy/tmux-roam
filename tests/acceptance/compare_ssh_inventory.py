@@ -115,7 +115,9 @@ def main():
         wrapper.chmod(0o700)
         try:
             for target, name in zip(targets, ("local|🐱", "remote|Юникод", "named|🐱")):
-                subprocess.run([tmux, *target, "-f", "/dev/null", "new-session", "-d", "-s", name], check=True)
+                # Explicit names disable automatic shell-driven renaming while
+                # successive SSH/backend observations compare window metadata.
+                subprocess.run([tmux, *target, "-f", "/dev/null", "new-session", "-d", "-s", name, "-n", "fixture"], check=True)
             config = root / "config.toml"
             config.write_text(f"""[discovery]
 command_timeout_seconds = 3
@@ -159,7 +161,7 @@ enabled = false
                 for exe in (PYTHON, GO):
                     code, data = call(exe, {**env, "TMUX_ROAM_CONFIG": str(fixture), "TMUX_ROAM_SSH_CONFIG": str(ssh_path),
                                            "XDG_RUNTIME_DIR": str(root / (label+"-runtime"))}, "list", "--json")
-                    assert code == 0 and rows(data) == observations[0], (label, data)
+                    assert code == 0 and rows(data) == observations[0], (label, str(exe), code, data, observations[0])
             agent_socket = root / "agent.sock"
             agent = subprocess.Popen(["ssh-agent", "-D", "-a", str(agent_socket)], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             try:
@@ -184,7 +186,7 @@ enabled = false
             deadline = time.monotonic() + 3
             while remote.exists() and time.monotonic() < deadline:
                 time.sleep(0.01)
-            subprocess.run([tmux, "-S", str(remote), "-f", "/dev/null", "new-session", "-d", "-s", previous["name"]], check=True)
+            subprocess.run([tmux, "-S", str(remote), "-f", "/dev/null", "new-session", "-d", "-s", previous["name"], "-n", "fixture"], check=True)
             for exe in (PYTHON, GO):
                 code, data = call(exe, env, "list", "--json")
                 current = next(r for r in data["sessions"] if r["host_id"] == "absolute")

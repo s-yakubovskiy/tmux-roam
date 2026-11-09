@@ -15,7 +15,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def main():
-    archive = ROOT / 'build/releases/tmux-roam-0.1.0-linux_amd64.tar.gz'
+    arch = {'x86_64': 'amd64', 'aarch64': 'arm64'}[os.uname().machine]
+    archive = ROOT / f'build/releases/tmux-roam-0.1.0-linux_{arch}.tar.gz'
     if not archive.exists():
         raise SystemExit('build releases first: sh scripts/release-go.sh')
     with tempfile.TemporaryDirectory(prefix='tr-install-') as temporary:
