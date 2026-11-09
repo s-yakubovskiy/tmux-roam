@@ -1,0 +1,208 @@
+{
+  "platform": "Linux-6.17.0-1033-oem-x86_64-with-glibc2.39",
+  "load": [
+    0.68505859375,
+    1.24560546875,
+    1.71728515625
+  ],
+  "runs": 50,
+  "remote_sessions": 20,
+  "power_state_start": {
+    "/sys/class/power_supply/ucsi-source-psy-USBC000:002/online": "0",
+    "/sys/class/power_supply/ucsi-source-psy-USBC000:001/online": "0",
+    "/sys/class/power_supply/AC/online": "0",
+    "/sys/firmware/acpi/platform_profile": "balanced",
+    "/sys/devices/system/cpu/cpu7/cpufreq/scaling_governor": "powersave",
+    "/sys/devices/system/cpu/cpu7/cpufreq/scaling_cur_freq": "1929760",
+    "/sys/devices/system/cpu/cpu7/cpufreq/energy_performance_preference": "balance_power",
+    "/sys/devices/system/cpu/cpu5/cpufreq/scaling_governor": "powersave",
+    "/sys/devices/system/cpu/cpu5/cpufreq/scaling_cur_freq": "1942192",
+    "/sys/devices/system/cpu/cpu5/cpufreq/energy_performance_preference": "balance_power",
+    "/sys/devices/system/cpu/cpu3/cpufreq/scaling_governor": "powersave",
+    "/sys/devices/system/cpu/cpu3/cpufreq/scaling_cur_freq": "2900000",
+    "/sys/devices/system/cpu/cpu3/cpufreq/energy_performance_preference": "balance_power",
+    "/sys/devices/system/cpu/cpu1/cpufreq/scaling_governor": "powersave",
+    "/sys/devices/system/cpu/cpu1/cpufreq/scaling_cur_freq": "2828260",
+    "/sys/devices/system/cpu/cpu1/cpufreq/energy_performance_preference": "balance_power",
+    "/sys/devices/system/cpu/cpu6/cpufreq/scaling_governor": "powersave",
+    "/sys/devices/system/cpu/cpu6/cpufreq/scaling_cur_freq": "2001850",
+    "/sys/devices/system/cpu/cpu6/cpufreq/energy_performance_preference": "balance_power",
+    "/sys/devices/system/cpu/cpu4/cpufreq/scaling_governor": "powersave",
+    "/sys/devices/system/cpu/cpu4/cpufreq/scaling_cur_freq": "1933253",
+    "/sys/devices/system/cpu/cpu4/cpufreq/energy_performance_preference": "balance_power",
+    "/sys/devices/system/cpu/cpu2/cpufreq/scaling_governor": "powersave",
+    "/sys/devices/system/cpu/cpu2/cpufreq/scaling_cur_freq": "1770856",
+    "/sys/devices/system/cpu/cpu2/cpufreq/energy_performance_preference": "balance_power",
+    "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor": "powersave",
+    "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq": "2811925",
+    "/sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference": "balance_power"
+  },
+  "controller_sha256": "bc38bc5d8d9b6dc754c74901b2434e1e8cbb502ddf5d1802cb5ca1e51d5d78f1",
+  "tmux": "tmux 3.8",
+  "fzf": "0.74.5 (c0a193e0)",
+  "build": "CGO_ENABLED=0 -trimpath -ldflags='-s -w'",
+  "screen_parser": "pyte 0.8.2 / wcwidth 0.2.13",
+  "native_scope": "fully hydrated dormant entries; 100 expected window mirrors (100 requested)",
+  "scrollback_lines": 20000,
+  "terminal": "110x32 xterm-256color PTY with DA/colour/size replies; tmux escape-time 10 ms (workstation setting)",
+  "scope": "actual rendered rows/prompt/footer; cached scripted SSH then hung refresh; Go first key immediately after frame; Python steady typing after 200 ms; polling upper bounds",
+  "results": {
+    "Go": {
+      "first_manager_ms": 69.66,
+      "first_manager_usable_ms": 78.06,
+      "first_search_ms": 64.01,
+      "first_search_usable_ms": 72.08,
+      "manager_open": {
+        "samples": 50,
+        "p50_ms": 69.76,
+        "p95_ms": 76.85
+      },
+      "search_open": {
+        "samples": 50,
+        "p50_ms": 64.68,
+        "p95_ms": 69.79
+      },
+      "typing": {
+        "samples": 900,
+        "p50_ms": 5.32,
+        "p95_ms": 8.75
+      },
+      "fzf_escape": {
+        "samples": 100,
+        "p50_ms": 22.17,
+        "p95_ms": 22.97
+      },
+      "escape_visible": {
+        "samples": 100,
+        "p50_ms": 31.55,
+        "p95_ms": 43.81
+      },
+      "cancel_join": {
+        "samples": 100,
+        "p50_ms": 43.4,
+        "p95_ms": 71.5
+      },
+      "local_selection": {
+        "samples": 50,
+        "p50_ms": 29.03,
+        "p95_ms": 35.1
+      },
+      "manager_usable": {
+        "samples": 50,
+        "p50_ms": 80.56,
+        "p95_ms": 91.25
+      },
+      "search_usable": {
+        "samples": 50,
+        "p50_ms": 72.76,
+        "p95_ms": 80.72
+      },
+      "first_key": {
+        "samples": 100,
+        "p50_ms": 6.73,
+        "p95_ms": 12.58
+      }
+    },
+    "Python": {
+      "first_manager_ms": 240.23,
+      "first_search_ms": 234.11,
+      "manager_open": {
+        "samples": 50,
+        "p50_ms": 206.05,
+        "p95_ms": 251.09
+      },
+      "search_open": {
+        "samples": 50,
+        "p50_ms": 243.49,
+        "p95_ms": 283.23
+      },
+      "typing": {
+        "samples": 900,
+        "p50_ms": 6.12,
+        "p95_ms": 13.25
+      },
+      "fzf_escape": {
+        "samples": 100,
+        "p50_ms": 116.97,
+        "p95_ms": 118.74
+      },
+      "escape_visible": {
+        "samples": 100,
+        "p50_ms": 130.2,
+        "p95_ms": 140.0
+      },
+      "cancel_join": {
+        "samples": 100,
+        "p50_ms": 190.17,
+        "p95_ms": 271.61
+      },
+      "local_selection": {
+        "samples": 50,
+        "p50_ms": 227.85,
+        "p95_ms": 256.83
+      }
+    }
+  },
+  "escape_time": "10",
+  "native_hydration_seconds": 8.1,
+  "hydrated_remote_entries": 20,
+  "hydrated_window_mirrors": 100,
+  "server_job_settle_ms": 0.06,
+  "server_fds": {
+    "before": 10,
+    "immediate": 11,
+    "after": 10
+  },
+  "native": {
+    "open": {
+      "samples": 50,
+      "p50_ms": 38.75,
+      "p95_ms": 44.95
+    },
+    "local_selection": {
+      "samples": 50,
+      "p50_ms": 7.9,
+      "p95_ms": 12.44
+    }
+  },
+  "gates": {
+    "manager_frame": false,
+    "search_frame": false,
+    "typing": true,
+    "local_selection": true,
+    "visible_close": true,
+    "cancel_join": true,
+    "native_open": false,
+    "native_local_selection": true
+  },
+  "power_state_end": {
+    "/sys/class/power_supply/ucsi-source-psy-USBC000:002/online": "0",
+    "/sys/class/power_supply/ucsi-source-psy-USBC000:001/online": "0",
+    "/sys/class/power_supply/AC/online": "0",
+    "/sys/firmware/acpi/platform_profile": "balanced",
+    "/sys/devices/system/cpu/cpu7/cpufreq/scaling_governor": "powersave",
+    "/sys/devices/system/cpu/cpu7/cpufreq/scaling_cur_freq": "1700323",
+    "/sys/devices/system/cpu/cpu7/cpufreq/energy_performance_preference": "balance_power",
+    "/sys/devices/system/cpu/cpu5/cpufreq/scaling_governor": "powersave",
+    "/sys/devices/system/cpu/cpu5/cpufreq/scaling_cur_freq": "1700221",
+    "/sys/devices/system/cpu/cpu5/cpufreq/energy_performance_preference": "balance_power",
+    "/sys/devices/system/cpu/cpu3/cpufreq/scaling_governor": "powersave",
+    "/sys/devices/system/cpu/cpu3/cpufreq/scaling_cur_freq": "1403570",
+    "/sys/devices/system/cpu/cpu3/cpufreq/energy_performance_preference": "balance_power",
+    "/sys/devices/system/cpu/cpu1/cpufreq/scaling_governor": "powersave",
+    "/sys/devices/system/cpu/cpu1/cpufreq/scaling_cur_freq": "1506827",
+    "/sys/devices/system/cpu/cpu1/cpufreq/energy_performance_preference": "balance_power",
+    "/sys/devices/system/cpu/cpu6/cpufreq/scaling_governor": "powersave",
+    "/sys/devices/system/cpu/cpu6/cpufreq/scaling_cur_freq": "1700353",
+    "/sys/devices/system/cpu/cpu6/cpufreq/energy_performance_preference": "balance_power",
+    "/sys/devices/system/cpu/cpu4/cpufreq/scaling_governor": "powersave",
+    "/sys/devices/system/cpu/cpu4/cpufreq/scaling_cur_freq": "1700273",
+    "/sys/devices/system/cpu/cpu4/cpufreq/energy_performance_preference": "balance_power",
+    "/sys/devices/system/cpu/cpu2/cpufreq/scaling_governor": "powersave",
+    "/sys/devices/system/cpu/cpu2/cpufreq/scaling_cur_freq": "1493043",
+    "/sys/devices/system/cpu/cpu2/cpufreq/energy_performance_preference": "balance_power",
+    "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor": "powersave",
+    "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq": "1538298",
+    "/sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference": "balance_power"
+  }
+}

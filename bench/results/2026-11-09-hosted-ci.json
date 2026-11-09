@@ -1,0 +1,47 @@
+{
+  "date": "2026-11-09",
+  "candidate_branch": "candidate/go-runtime-20261109",
+  "pull_request": "https://github.com/s-yakubovskiy/tmux-roam/pull/1",
+  "tested_source_commit": "eb4d4662beafc0b4fb9b13249fce39024d3a9049",
+  "run": {
+    "conclusion": "success",
+    "databaseId": 42632049269,
+    "event": "pull_request",
+    "headSha": "eb4d4662beafc0b4fb9b13249fce39024d3a9049",
+    "status": "completed",
+    "url": "https://github.com/s-yakubovskiy/tmux-roam/actions/runs/42632049269"
+  },
+  "jobs": [
+    {
+      "arch": "amd64",
+      "platform": "Linux 7.0.0-1019-azure x86_64",
+      "job_url": "https://github.com/s-yakubovskiy/tmux-roam/actions/runs/42632049269/job/129210537207",
+      "conclusion": "success",
+      "baseline_tests": 34,
+      "baseline_skipped": 0,
+      "baseline_seconds": 35.87,
+      "fuzz_targets_passed": 4,
+      "artifact_checksums_verified": {
+        "tmux-roam-0.1.0-linux_amd64.tar.gz": "04725629e96edce7a53bf4ad3ee3036479e3b06e4a7b4cf850e6456692abfb22",
+        "tmux-roam-0.1.0-linux_arm64.tar.gz": "249b25f0a6fdec0b5b3a9db67786f968191a2fccab20d4847f44238040c75932"
+      }
+    },
+    {
+      "arch": "arm64",
+      "platform": "Linux 7.0.0-1017-azure aarch64",
+      "job_url": "https://github.com/s-yakubovskiy/tmux-roam/actions/runs/42632049269/job/129210537551",
+      "conclusion": "success",
+      "baseline_tests": 34,
+      "baseline_skipped": 0,
+      "baseline_seconds": 37.872,
+      "fuzz_targets_passed": 4,
+      "artifact_checksums_verified": {
+        "tmux-roam-0.1.0-linux_amd64.tar.gz": "04725629e96edce7a53bf4ad3ee3036479e3b06e4a7b4cf850e6456692abfb22",
+        "tmux-roam-0.1.0-linux_arm64.tar.gz": "249b25f0a6fdec0b5b3a9db67786f968191a2fccab20d4847f44238040c75932"
+      }
+    }
+  ],
+  "scope": "Native Linux AMD64 and ARM64, not emulation. Both use local tmux 3.8, fzf 0.74.5, and a real 3.6a server fixture for refusal. Hosted mounts/production activation/physical acceptance/oldest-kernel support are outside these jobs.",
+  "production_activated": false,
+  "cross_runner_archives_identical": true
+}

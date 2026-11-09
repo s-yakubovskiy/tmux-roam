@@ -20,7 +20,7 @@ Use [README.md](README.md), the implementation, and executable acceptance scenar
 - Keep UI improvements incremental and measurable. Preserve familiar shortcuts, minimal styling, and current cancellation behavior.
 - Introduce no database, plugin/provider framework, custom SSH client, or replacement terminal renderer in this migration.
 
-The first supported release targets Linux AMD64 and ARM64. Validate the actual minimum kernel and tmux requirements rather than assuming static binaries work on every Linux machine. The current workstation uses tmux 3.8/fzf 0.74.5; actual isolated canaries pass on Omni with remote tmux 3.6 and DevDocker with remote tmux 3.6a. AMD64 has runtime evidence; ARM64 currently has cross-build evidence only. Retain the existing tmux-native search fallback where capability detection permits it.
+The first supported release targets Linux AMD64 and ARM64. Validate the actual minimum kernel and tmux requirements rather than assuming static binaries work on every Linux machine. The current workstation uses tmux 3.8/fzf 0.74.5; actual isolated canaries pass on Omni with remote tmux 3.6 and DevDocker with remote tmux 3.6a. AMD64 has real-host runtime evidence; native AMD64/ARM64 hosted CI also passes the full runtime, release and fuzz checks. The oldest supported kernel remains unverified. Retain the existing tmux-native search fallback where capability detection permits it.
 
 ### Definition of done
 
@@ -487,7 +487,7 @@ Check before declaring migration complete:
 - [ ] Network loss retains useful entries; reconnect reuses safe carriers; confirmed ended sessions are cleaned without harming modified resources.
 - [ ] Config diff/sync, symlink preservation, backups, and stopped/running destination behavior pass with the shipped helpers.
 - [ ] Physical Latin/Russian keyboard and touchpad acceptance is recorded separately from generated PTY input.
-- [ ] The new runtime and installation work with Python removed from the test environment; developer-only test tooling is clearly distinguished.
+- [x] The new runtime and installation work with Python removed from the test environment; developer-only test tooling is clearly distinguished (native AMD64/ARM64 release installation and helper acceptance).
 - [ ] No unexplained parity, performance, cancellation, or ownership failures remain. Every exception has a documented equivalent behavior and acceptance evidence.
 - [x] Rollback was actually exercised, not only documented (isolated release and backend coexistence acceptance; production activation remains pending).
 

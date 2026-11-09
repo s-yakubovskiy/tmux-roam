@@ -6,7 +6,7 @@ tmux-roam shows local tmux sessions and sessions on explicitly configured SSH ho
 
 Development roadmap: [Go migration plan](GO_MIGRATION_PLAN.md), including full feature parity, performance targets, package boundaries, and verification checklists for every stage.
 
-This checkout is version **0.1.0**, with an unpublished Go release candidate. The Go runtime requires Linux, OpenSSH, local tmux **3.8+** and fzf; Python and Go are development tools only. Validation covers local tmux 3.8/fzf 0.74.5 and remote tmux 3.6 on Omni and 3.6a on DevDocker. Linux AMD64 runs on both targets; Linux ARM64 cross-builds but has not been executed on hardware.
+This checkout is version **0.1.0**, with an unpublished Go release candidate. The Go runtime requires Linux, OpenSSH, local tmux **3.8+** and fzf; Python and Go are development tools only. Validation covers local tmux 3.8/fzf 0.74.5 and remote tmux 3.6 on Omni and 3.6a on DevDocker. Linux AMD64 runs on both targets. Native Linux AMD64 and ARM64 hosted CI passes the full acceptance, release and fuzz checks; the oldest supported kernel remains unverified.
 
 Local servers older than 3.8 can crash when respawning a pane with control clients attached ([upstream fix](https://github.com/tmux/tmux/commit/4714f478fed87ae2c510ecd035aa89c5a90dedf8)). Remote opens and native metadata refresh refuse before creating or respawning panes on those servers. Local session switching remains available. The guard checks the running server version; updating only the client binary does not upgrade an existing server. Remote tmux 3.6/3.6a remains supported.
 
@@ -219,7 +219,7 @@ The cache at `$XDG_CACHE_HOME/tmux-roam` contains metadata only. Runtime sockets
 
 ## Verification and limits
 
-Run `sh scripts/check-go.sh` after installing the development dependencies (Go, Python, tmux 3.8, fzf 0.74.5, openssh-server and Vim). Set `TMUX_ROAM_TEST_SSHD` to an absolute sshd path if necessary. The suite runs Go tests/vet/race checks, public CLI/config/inventory comparisons, real loopback SSH, attachment/reconnect, uncertain create/delete outcomes, live resize, input/selection during delayed fzf refreshes, terminal streaming and real Vim editing, Python-free config sync, offline release installation/rollback, backend coexistence and the 34 legacy Python baseline tests. Run `sh scripts/fuzz-go.sh` for the bounded configuration, identity, inventory and quoting fuzz checks.
+Run `sh scripts/check-go.sh` after installing the development dependencies (Go, Python, tmux 3.8, fzf 0.74.5, openssh-server, Vim and zsh). Set `TMUX_ROAM_TEST_SSHD` to an absolute sshd path if necessary. The suite runs Go tests/vet/race checks, public CLI/config/inventory comparisons, real loopback SSH, attachment/reconnect, uncertain create/delete outcomes, live resize, input/selection during delayed fzf refreshes, terminal streaming and real Vim editing, Python-free config sync, offline release installation/rollback, backend coexistence and the 34 legacy Python baseline tests. Run `sh scripts/fuzz-go.sh` for the bounded configuration, identity, inventory and quoting fuzz checks.
 
 To include actual noexec/full-filesystem config-sync checks, set `TMUX_ROAM_TEST_CONTAINER_IMAGE` to an existing Linux AMD64 Docker image containing standard `sh`/`tar` tools. The fixtures use isolated containers with no network, private tmpfs mounts and a read-only build bind mount; they pull no image and change no host mount.
 
