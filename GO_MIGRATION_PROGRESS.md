@@ -168,6 +168,9 @@ The first cold preflight includes actual SSH transport establishment; the later 
 
 ## Native release scope and timing review
 
+The [500-session fallback run](bench/results/2026-11-09-ui-large-session-fallback.json) completed hydration in 115.18 seconds, with all 500 remote session entries and **zero mirrors**, then finished 50 mixed-backend UI trials. `doctor` confirmed the limit. Cached manager/search p95 was 132.18/198.16 ms (within 250 ms), typing 9.66 ms and joined cancellation 132.93 ms. Local selection was 77.71 ms and visible close 100.10 ms, exceeding the unchanged 50 ms gates. Native opening/local selection p95 was 163.05/102.97 ms. FDs remained 10→10. Starting load was 2.97; power was observed offline during this workload. The fallback prevents the deferred mirror setup, but does not resolve all large native-inventory responsiveness limits.
+
+
 The [limited build's normal repeat](bench/results/2026-11-09-ui-normal-mirror-limit.json) completed 50 trials but measured manager/search medians of 70.18/64.80 ms and native opening p95 of 42.19 ms. Typing, selection, visible close, cancellation and resource checks still pass. Python opening also roughly doubled against the earlier run. Starting one-minute load was 2.30. A subsequent read-only power probe during the next workload found AC offline, `balance_power` CPU energy preference, and CPU frequencies around 1.6–2.6 GHz. Earlier runs did not record power state, so this is a hypothesis about the variance, not a proven cause. Future UI reports now record power state at both ends. The 25 ms exception remains under review; the current repeat also misses the unchanged fuzzy median gates.
 
 
@@ -179,7 +182,7 @@ The [latest unrestricted large setup](bench/results/2026-11-09-ui-large-mirrors-
 
 ## Remaining production gates
 
-1. Review the proposed native-opening exception after final limited-build measurements. The preceding build measured 22.31 ms p95 against 20 ms; earlier ambient-load variability remains recorded. Large mirrors are deferred by the user, with a 100-window/host cap and session fallback; full 2,500-mirror creation is outside this release scope. Validate the final 500-session fallback workload without weakening the other input/identity/resource gates. New-attachment SSH/handshake/confirmation phases are reported; actual WAN latency is unmeasured.
+1. Establish controlled reference power/load conditions and finish performance review. The current normal repeat misses fuzzy medians and the proposed 25 ms native exception; the 500-session fallback misses local-selection/visible-close budgets. Large mirrors are deferred by the user, with a 100-window/host cap and session fallback; full 2,500-mirror creation is outside release scope. Keep these misses visible and retain the other input/identity/resource gates. New-attachment SSH/handshake/confirmation phases are reported; actual WAN latency is unmeasured.
 2. Finish physical visual/input/clipboard and F2 sync acceptance; run hosted CI and validate ARM64 hardware and minimum platforms. Both final-binary real-host canaries now pass at the default fixture timeout. Automated resize, terminal apps and filesystem/transport config-sync failures pass.
 3. The dirty TPM clone has a verified read-only rollback archive; filesystem-enforced immutability remains unproven. Keep legacy Python paths while old supervisors can still depend on them.
 4. Record physical Latin/Russian keyboard, touchpad, terminal clipboard, suspend/resume and real network recovery acceptance, followed by the agreed two-working-day soak.
