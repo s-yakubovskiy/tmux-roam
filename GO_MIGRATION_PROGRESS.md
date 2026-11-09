@@ -105,7 +105,7 @@ TMUX_ROAM_UI_RUNS=50 TMUX_ROAM_UI_SESSIONS=0 python3 bench/ui.py
 TMUX_ROAM_UI_RUNS=50 TMUX_ROAM_UI_HYDRATE=1 \
   TMUX_ROAM_UI_SCROLLBACK=20000 python3 bench/ui.py
 TMUX_ROAM_UI_RUNS=50 TMUX_ROAM_UI_SESSIONS=500 TMUX_ROAM_UI_HYDRATE=1 \
-  TMUX_ROAM_UI_SCROLLBACK=20000 python3 bench/ui.py
+  TMUX_ROAM_UI_EXPECT_MIRRORS=0 TMUX_ROAM_UI_SCROLLBACK=20000 python3 bench/ui.py
 python3 bench/remote.py
 TMUX_ROAM_RESOURCE_REPORT=bench/results/2026-11-09-supervisor.json \
   python3 tests/acceptance/session_lifecycle.py
