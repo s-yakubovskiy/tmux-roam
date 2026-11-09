@@ -1,0 +1,73 @@
+{
+  "date": "2026-11-09",
+  "supported_local_tmux_minimum": "3.8",
+  "supported_remote_versions_observed": [
+    "3.6",
+    "3.6a"
+  ],
+  "upstream_fix": {
+    "commit": "4714f478fed87ae2c510ecd035aa89c5a90dedf8",
+    "url": "https://github.com/tmux/tmux/commit/4714f478fed87ae2c510ecd035aa89c5a90dedf8",
+    "title": "When a pane is respawned, reset the control mode offsets. GitHub issue 5498 from Alex Rattray.",
+    "source_3_7_contains_fix": false,
+    "source_3_8_contains_fix": true
+  },
+  "crash_reproduction": {
+    "scope": "Disposable local server only; no production tmux change",
+    "controller_sha256": "e606edef8b2dd57dbd55487a373f72625dc3541e88e6ad5a7ecdbc81ba1c5adc",
+    "source_url": "https://github.com/tmux/tmux/releases/download/3.6a/tmux-3.6a.tar.gz",
+    "source_archive_sha256": "b6d8d9c76585db8ef5fa00d4931902fa4b8cbe8166f528f44fc403961a3f3759",
+    "fixture_binary_sha256": "0da322a5d19788d54dd3b031848db301eba3cc5e978850136e81bcdfb6aea223",
+    "build": "Official release source, local libraries, CFLAGS=-O0 -g",
+    "signal": "SIGSEGV",
+    "location": "input.c:957 input_parse",
+    "input_length": 18446744073709550500,
+    "trace": [
+      "input_parse",
+      "input_parse_buffer",
+      "input_parse_pane",
+      "window_pane_read_callback",
+      "bufferevent_run_readcb_",
+      "event_base_loop"
+    ],
+    "diagnosis": "Respawn frees the input buffer without resetting pane/control offsets; stale offsets underflow the new buffer length.",
+    "temporary_full_trace": "/tmp/tr-tmux36-source-gdb.log"
+  },
+  "safe_refusal_regression": {
+    "controller_sha256": "bc38bc5d8d9b6dc754c74901b2434e1e8cbb502ddf5d1802cb5ca1e51d5d78f1",
+    "command": "TMUX_ROAM_TEST_OLD_TMUX=/path/to/official-source-built-3.6a/tmux python3 tests/acceptance/local_version.py",
+    "local_client": "tmux 3.8",
+    "local_server": "3.6a",
+    "result": "passed",
+    "checks": [
+      "Local switching remains available",
+      "Remote open refuses before any SSH call or connection state publication",
+      "Native refresh refuses before pane/metadata mutation",
+      "Server PID, generation and pane/session/window/process IDs unchanged",
+      "Invoking client stays on selected local project",
+      "Doctor reports actual older server and returns nonzero"
+    ],
+    "previous_verified_controller_sha256": [
+      "70ac4dc99d9581366b987a964fb628b902519c05cad4ba30e4cc7ed34e731571"
+    ]
+  },
+  "production_changed": false,
+  "validation": {
+    "full_suite": "passed",
+    "go_test_vet_race": true,
+    "acceptance": "all, including actual noexec/ENOSPC mounts and real old local-server refusal",
+    "python_baseline_tests": 34,
+    "python_baseline_seconds": 53.01,
+    "log": "/tmp/tr-check-mirror-limit.log",
+    "previous_validation": {
+      "full_suite": "passed",
+      "go_test_vet_race": true,
+      "acceptance": "all, including actual noexec/ENOSPC mounts and real old local-server refusal",
+      "python_baseline_tests": 34,
+      "python_baseline_seconds": 39.197,
+      "log": "/tmp/tr-check-platform-guard.log"
+    },
+    "controller_sha256": "bc38bc5d8d9b6dc754c74901b2434e1e8cbb502ddf5d1802cb5ca1e51d5d78f1",
+    "native_mirror_limit_regression": "passed: transition to session entries, untouched mirror cleanup, restored window index, remote count preserved"
+  }
+}

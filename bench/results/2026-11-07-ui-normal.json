@@ -1,0 +1,114 @@
+{
+  "platform": "Linux-6.17.0-1033-oem-x86_64-with-glibc2.39",
+  "load": [
+    2.3642578125,
+    2.2548828125,
+    1.9990234375
+  ],
+  "runs": 50,
+  "remote_sessions": 20,
+  "tmux": "tmux 3.8",
+  "fzf": "0.74.5 (c0a193e0)",
+  "build": "CGO_ENABLED=0 -trimpath -ldflags='-s -w'",
+  "screen_parser": "pyte 0.8.2 / wcwidth 0.2.13",
+  "terminal": "110x32 xterm-256color PTY with DA/colour/size replies; tmux escape-time 10 ms (workstation setting)",
+  "scope": "actual rendered rows/prompt/footer; cached scripted SSH then hung refresh; per-key typing; polling upper bounds",
+  "results": {
+    "Go": {
+      "first_manager_ms": 76.14,
+      "first_search_ms": 79.79,
+      "manager_open": {
+        "samples": 50,
+        "p50_ms": 79.61,
+        "p95_ms": 85.97
+      },
+      "search_open": {
+        "samples": 50,
+        "p50_ms": 86.27,
+        "p95_ms": 94.61
+      },
+      "typing": {
+        "samples": 900,
+        "p50_ms": 5.54,
+        "p95_ms": 9.6
+      },
+      "fzf_escape": {
+        "samples": 100,
+        "p50_ms": 22.11,
+        "p95_ms": 23.46
+      },
+      "escape_visible": {
+        "samples": 100,
+        "p50_ms": 27.83,
+        "p95_ms": 31.55
+      },
+      "cancel_join": {
+        "samples": 100,
+        "p50_ms": 42.68,
+        "p95_ms": 58.39
+      },
+      "local_selection": {
+        "samples": 50,
+        "p50_ms": 32.49,
+        "p95_ms": 37.37
+      }
+    },
+    "Python": {
+      "first_manager_ms": 227.13,
+      "first_search_ms": 216.56,
+      "manager_open": {
+        "samples": 50,
+        "p50_ms": 205.36,
+        "p95_ms": 245.47
+      },
+      "search_open": {
+        "samples": 50,
+        "p50_ms": 223.36,
+        "p95_ms": 265.56
+      },
+      "typing": {
+        "samples": 900,
+        "p50_ms": 6.21,
+        "p95_ms": 14.18
+      },
+      "fzf_escape": {
+        "samples": 100,
+        "p50_ms": 117.43,
+        "p95_ms": 120.3
+      },
+      "escape_visible": {
+        "samples": 100,
+        "p50_ms": 123.54,
+        "p95_ms": 127.57
+      },
+      "cancel_join": {
+        "samples": 100,
+        "p50_ms": 252.3,
+        "p95_ms": 281.97
+      },
+      "local_selection": {
+        "samples": 50,
+        "p50_ms": 224.23,
+        "p95_ms": 250.23
+      }
+    }
+  },
+  "escape_time": "10",
+  "server_fds": {
+    "before": 10,
+    "after": 10
+  },
+  "native": {
+    "open": {
+      "samples": 50,
+      "p50_ms": 9.33,
+      "p95_ms": 13.1
+    },
+    "local_selection": {
+      "samples": 50,
+      "p50_ms": 5.94,
+      "p95_ms": 7.03
+    }
+  },
+  "native_scope": "direct Go-installed bindings; asynchronous native metadata hydration, not a fully hydrated 500-placeholder tree"
+}

@@ -1,0 +1,41 @@
+{
+  "date": "2026-11-09",
+  "controller_sha256": "70ac4dc99d9581366b987a964fb628b902519c05cad4ba30e4cc7ed34e731571",
+  "scope": "Diagnostic observations during failed large-mirror setup; no completed UI trials",
+  "samples": [
+    {
+      "monotonic": 398029.85,
+      "sessions": 117,
+      "windows": 692,
+      "cpu_seconds": 35.32
+    },
+    {
+      "monotonic": 398100.83,
+      "sessions": 147,
+      "windows": 871,
+      "cpu_seconds": 86.48
+    },
+    {
+      "monotonic": 398162.68,
+      "sessions": 148,
+      "windows": 877,
+      "cpu_seconds": 112.97
+    },
+    {
+      "monotonic": 398329.45,
+      "sessions": 149,
+      "windows": 884,
+      "cpu_seconds": 178.28,
+      "elapsed_seconds": 343.5
+    }
+  ],
+  "carrier_state_check": {
+    "at_seconds": 399.1,
+    "sessions": 150,
+    "missing_state_files": []
+  },
+  "partial_mirror_inspection": "Inspected the last partial carrier. Its observed completed mirrors retained owner/id/name/command/death metadata; no lost ownership was observed. This does not establish complete ownership for every interrupted resource.",
+  "profiler": "Matching-kernel perf unavailable; one GDB attach/backtrace sample during setup had stripped tmux frames. No CPU hotspot attribution is claimed. The brief debugger stop means this run is diagnostic setup evidence.",
+  "user_scope_decision": "Defer large mirrors and review a timing exception",
+  "runtime_decision": "Limit automatic native mirrors to 100 remote windows per host. Larger hosts retain session entries and true remote window counts; remove only untouched prior mirrors."
+}

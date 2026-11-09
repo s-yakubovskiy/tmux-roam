@@ -95,3 +95,22 @@ width = "90%"`, ""},
 		})
 	}
 }
+
+func FuzzConfigLoad(f *testing.F) {
+	for _, value := range []string{"", "version=1", "[[hosts]]\nid='a'\nssh='a'", "[discovery]\nconcurrency=4", "hosts=[1]"} {
+		f.Add(value)
+	}
+	path := filepath.Join(f.TempDir(), "config.toml")
+	f.Fuzz(func(t *testing.T, value string) {
+		if len(value) > 1<<20 {
+			return
+		}
+		if err := os.WriteFile(path, []byte(value), 0600); err != nil {
+			t.Fatal(err)
+		}
+		c, err := Load(path)
+		if err == nil && (c.Concurrency < 1 || c.Concurrency > 32 || c.CommandTimeoutSeconds < 1) {
+			t.Fatalf("invalid accepted limits: %+v", c)
+		}
+	})
+}

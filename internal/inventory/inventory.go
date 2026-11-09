@@ -2,16 +2,15 @@ package inventory
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 	"unicode/utf8"
@@ -19,6 +18,9 @@ import (
 	"code.talos.lowlife.us/baza/tmux-roam/internal/config"
 	"code.talos.lowlife.us/baza/tmux-roam/internal/model"
 	"code.talos.lowlife.us/baza/tmux-roam/internal/process"
+	"code.talos.lowlife.us/baza/tmux-roam/internal/ssh"
+	"code.talos.lowlife.us/baza/tmux-roam/internal/store"
+	"code.talos.lowlife.us/baza/tmux-roam/internal/tmux"
 )
 
 const sessionFormat = "#{session_id}|#{session_created}|#{session_name}|#{session_windows}|#{session_attached}"
@@ -28,12 +30,7 @@ const serverFormat = "#{pid}|#{start_time}|#{socket_path}"
 const clientMarker = "TMUX_ROAM_CLIENTS_V1"
 const windowMarker = "TMUX_ROAM_WINDOWS_V1"
 
-func tmuxBase() []string {
-	if s := strings.SplitN(os.Getenv("TMUX"), ",", 2)[0]; s != "" {
-		return []string{"tmux", "-S", s}
-	}
-	return []string{"tmux"}
-}
+func tmuxBase() []string { return tmux.Base() }
 func command(ctx context.Context, seconds int, args ...string) (process.Result, error) {
 	return process.Capture(ctx, time.Duration(seconds)*time.Second, 1<<20, args...)
 }
@@ -66,7 +63,7 @@ func sessionLine(line string, remote bool) (model.Record, string, error) {
 	if err != nil {
 		return rec, "", err
 	}
-	if len(p) != right+3 || !numericID(p[0], '$') {
+	if len(p) != right+3 || !numericID(p[0], '$') || !decimal(p[1]) || !decimal(p[3]) || !decimal(p[4]) {
 		return rec, "", fmt.Errorf("malformed session record")
 	}
 	created, e1 := strconv.ParseInt(p[1], 10, 64)
@@ -86,10 +83,13 @@ func sessionLine(line string, remote bool) (model.Record, string, error) {
 	return rec, "", nil
 }
 func numericID(s string, marker byte) bool {
-	if len(s) < 2 || s[0] != marker {
+	return len(s) >= 2 && s[0] == marker && decimal(s[1:])
+}
+func decimal(s string) bool {
+	if s == "" {
 		return false
 	}
-	for i := 1; i < len(s); i++ {
+	for i := range s {
 		if s[i] < '0' || s[i] > '9' {
 			return false
 		}
@@ -112,45 +112,58 @@ func records(host, label string, server []string, entries []model.Record, source
 	return entries
 }
 func Local(ctx context.Context) ([]model.Record, error) {
-	base := tmuxBase()
-	serverResult, err := command(ctx, 5, append(base, "display-message", "-p", serverFormat)...)
+	result, err := command(ctx, 5, append(tmuxBase(), "display-message", "-p", serverFormat, ";", "list-sessions", "-F", sessionFormat+"|#{@tmux-roam-owner}")...)
 	if err != nil {
 		return nil, err
 	}
-	if serverResult.Code != 0 {
-		return nil, fmt.Errorf("%s", strings.TrimSpace(string(serverResult.Stderr)))
+	if result.Code != 0 {
+		return nil, fmt.Errorf("%s", strings.TrimSpace(string(result.Stderr)))
 	}
-	server := strings.SplitN(strings.TrimSpace(string(serverResult.Stdout)), "|", 3)
-	if len(server) != 3 || server[0] == "" || server[1] == "" {
+	return localRecords(string(result.Stdout))
+}
+
+// LocalClient captures the client/navigation and local inventory together so
+// opening a picker needs only one foreground snapshot subprocess.
+func LocalClient(ctx context.Context, name, token string) (client tmux.Client, rows []model.Record, err error) {
+	defer func() {
+		if err != nil && token != "" {
+			tmux.EndNavigation(context.Background(), name, token)
+		}
+	}()
+	var commands []string
+	if token != "" {
+		commands = append(commands, ";", "set-option", "-g", "@tmux-roam-navigation-"+name, token)
+	}
+	commands = append(commands, ";", "display-message", "-p", serverFormat, ";", "list-sessions", "-F", sessionFormat+"|#{@tmux-roam-owner}")
+	var out string
+	client, out, err = tmux.CaptureClientSnapshot(ctx, name, commands)
+	if err != nil {
+		return
+	}
+	rows, err = localRecords(out)
+	return
+}
+
+func localRecords(raw string) ([]model.Record, error) {
+	lines := strings.Split(strings.TrimSuffix(raw, "\n"), "\n")
+	server := strings.SplitN(lines[0], "|", 3)
+	if len(server) != 3 || !decimal(server[0]) || !decimal(server[1]) || !strings.HasPrefix(server[2], "/") {
 		return nil, fmt.Errorf("malformed tmux server identity")
 	}
-	sessions, err := command(ctx, 5, append(base, "list-sessions", "-F", sessionFormat)...)
-	if err != nil {
-		return nil, err
-	}
-	if sessions.Code != 0 {
-		return nil, fmt.Errorf("%s", strings.TrimSpace(string(sessions.Stderr)))
-	}
-	owners, err := command(ctx, 5, append(base, "list-sessions", "-F", "#{session_id}|#{@tmux-roam-owner}")...)
-	if err != nil {
-		return nil, err
-	}
-	owned := map[string]bool{}
-	for _, line := range strings.Split(string(owners.Stdout), "\n") {
-		if strings.HasSuffix(line, "|1") {
-			owned[strings.SplitN(line, "|", 2)[0]] = true
-		}
-	}
 	var entries []model.Record
-	for _, line := range strings.Split(strings.TrimSuffix(string(sessions.Stdout), "\n"), "\n") {
+	for _, line := range lines[1:] {
 		if line == "" {
 			continue
 		}
-		r, _, err := sessionLine(line, false)
+		end := strings.LastIndexByte(line, '|')
+		if end < 0 {
+			return nil, fmt.Errorf("malformed local ownership record")
+		}
+		r, _, err := sessionLine(line[:end], false)
 		if err != nil {
 			return nil, err
 		}
-		if !owned[r.SessionID] {
+		if line[end+1:] != "1" {
 			entries = append(entries, r)
 		}
 	}
@@ -174,8 +187,8 @@ func CacheDir() string {
 	return filepath.Join(base, "tmux-roam")
 }
 func Cached(host config.Host) []model.Record {
-	b, err := os.ReadFile(filepath.Join(CacheDir(), host.ID+".json"))
-	if err != nil || len(b) > 16<<20 {
+	b, err := readCache(host)
+	if err != nil {
 		return nil
 	}
 	var data cacheFile
@@ -196,7 +209,27 @@ func Cached(host config.Host) []model.Record {
 	}
 	return data.Records
 }
+
+func readCache(host config.Host) ([]byte, error) {
+	f, err := os.Open(filepath.Join(CacheDir(), host.ID+".json"))
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, (16<<20)+1))
+	if len(b) > 16<<20 {
+		return nil, fmt.Errorf("cache exceeded size limit")
+	}
+	return b, err
+}
+
 func Save(host config.Host, rows []model.Record) error {
+	return SaveContext(context.Background(), host, rows)
+}
+
+// SaveContext holds only a per-host publication lock, never a lock across SSH.
+// Polling LOCK_NB keeps a different process's writer cancellable.
+func SaveContext(ctx context.Context, host config.Host, rows []model.Record) error {
 	dir := CacheDir()
 	if err := ensurePrivateDir(dir); err != nil {
 		return err
@@ -206,22 +239,39 @@ func Save(host config.Host, rows []model.Record) error {
 		return err
 	}
 	defer lock.Close()
-	if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
-		return err
+	for {
+		if err = ctx.Err(); err != nil {
+			return err
+		}
+		err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EINTR) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-	stamp := float64(time.Now().UnixNano()) / 1e9
+	now := float64(time.Now().UnixNano()) / 1e9
+	stamp := now
 	if len(rows) > 0 {
 		stamp = rows[0].Observed
 	}
-	if previous, readErr := os.ReadFile(filepath.Join(dir, host.ID+".json")); readErr == nil {
+	if previous, readErr := readCache(host); readErr == nil {
 		var old cacheFile
 		if json.Unmarshal(previous, &old) == nil && old.Schema == 1 && old.HostID == host.ID {
 			oldStamp := old.Captured
 			if oldStamp == 0 && len(old.Records) > 0 {
 				oldStamp = old.Records[0].Observed
 			}
-			if oldStamp > stamp {
+			// A future observation indicates a wall-clock step backwards. Do not
+			// freeze cache publication until the old clock catches up.
+			if oldStamp > stamp && oldStamp <= now {
 				return nil
 			}
 		}
@@ -256,52 +306,20 @@ func Save(host config.Host, rows []model.Record) error {
 	if err = f.Close(); err != nil {
 		return err
 	}
+	if err = ctx.Err(); err != nil {
+		return err
+	}
 	return os.Rename(f.Name(), filepath.Join(dir, host.ID+".json"))
 }
 
-func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
-func shell(args []string) string {
-	parts := make([]string, len(args))
-	for i, a := range args {
-		parts[i] = quote(a)
-	}
-	return strings.Join(parts, " ")
-}
+func quote(s string) string      { return ssh.Quote(s) }
+func shell(args []string) string { return ssh.Join(args) }
 func sshBase(host config.Host, c config.Config) []string {
-	args := []string{"ssh"}
-	sshConfig := os.Getenv("TMUX_ROAM_SSH_CONFIG")
-	if sshConfig != "" {
-		args = append(args, "-F", sshConfig)
-	}
-	hash := sha256.Sum256([]byte(host.SSH + "\x00" + sshConfig))
-	control := filepath.Join(runtimeDir(), "ssh-"+hex.EncodeToString(hash[:])[:8]+"-%C")
-	if len([]byte(strings.ReplaceAll(control, "%C", strings.Repeat("0", 40)))) <= 90 {
-		args = append(args, "-o", "ControlMaster=auto", "-o", "ControlPersist=60", "-o", "ControlPath="+control)
-	}
-	return append(args, "-o", "BatchMode=yes", "-o", fmt.Sprintf("ConnectTimeout=%d", c.ConnectTimeoutSeconds), "-o", "ConnectionAttempts=1", "-o", "RemoteCommand=none", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-T", "--", host.SSH)
+	args, _ := ssh.Args(host, c, false)
+	return args
 }
-func runtimeDir() string {
-	base := os.Getenv("XDG_RUNTIME_DIR")
-	if base == "" {
-		base = fmt.Sprintf("/tmp/tmux-roam-%d", os.Getuid())
-	}
-	return filepath.Join(base, "tmux-roam")
-}
-
-func ensurePrivateDir(dir string) error {
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return err
-	}
-	info, err := os.Lstat(dir)
-	if err != nil {
-		return err
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || !info.IsDir() || info.Mode().Perm()&0077 != 0 || stat.Uid != uint32(os.Getuid()) {
-		return fmt.Errorf("unsafe private directory: %s", dir)
-	}
-	return nil
-}
+func runtimeDir() string                { return store.RuntimeDir() }
+func ensurePrivateDir(dir string) error { return store.PrivateDir(dir) }
 
 type Snapshot struct {
 	Records  []model.Record
@@ -319,7 +337,7 @@ func RemoteWithUpdate(ctx context.Context, host config.Host, c config.Config, up
 	return snapshot.Records, err
 }
 
-func RemoteSnapshot(ctx context.Context, host config.Host, c config.Config, update bool) (Snapshot, error) {
+func remoteSnapshot(ctx context.Context, host config.Host, c config.Config, update bool) (Snapshot, error) {
 	var empty Snapshot
 	if err := ensurePrivateDir(runtimeDir()); err != nil {
 		return empty, err
@@ -386,7 +404,7 @@ func RemoteSnapshot(ctx context.Context, host config.Host, c config.Config, upda
 	clients := map[string]string{}
 	for _, line := range lines[ci+1 : wi] {
 		p := strings.SplitN(line, "|", 4)
-		if len(p) != 4 || !numericID(p[2], '$') {
+		if len(p) != 4 || !numericID(p[2], '$') || !decimal(p[0]) {
 			return empty, fmt.Errorf("malformed inventory from %s: invalid client record", host.ID)
 		}
 		if _, e := strconv.Atoi(p[0]); e != nil {
@@ -405,7 +423,7 @@ func RemoteSnapshot(ctx context.Context, host config.Host, c config.Config, upda
 			continue
 		}
 		p := strings.SplitN(line, "|", 5)
-		if len(p) != 5 || !numericID(p[0], '$') || !numericID(p[1], '@') || (p[3] != "0" && p[3] != "1") {
+		if len(p) != 5 || !numericID(p[0], '$') || !numericID(p[1], '@') || !decimal(p[2]) || (p[3] != "0" && p[3] != "1") {
 			return empty, fmt.Errorf("malformed inventory from %s: invalid window record", host.ID)
 		}
 		index, err := strconv.Atoi(p[2])
@@ -484,49 +502,22 @@ func All(ctx context.Context, c config.Config, refresh bool) ([]model.Record, ma
 	} else {
 		rows = append(rows, local...)
 	}
-	type result struct {
-		host config.Host
-		rows []model.Record
-		err  error
-	}
-	ch := make(chan result, len(c.Hosts))
-	sem := make(chan struct{}, c.Concurrency)
-	var wg sync.WaitGroup
-	for _, host := range c.Hosts {
-		if !host.Enabled {
-			continue
-		}
-		if !refresh {
-			rows = append(rows, Cached(host)...)
-			continue
-		}
-		wg.Add(1)
-		go func(host config.Host) {
-			defer wg.Done()
-			select {
-			case sem <- struct{}{}:
-			case <-ctx.Done():
-				ch <- result{host: host, err: ctx.Err()}
-				return
-			}
-			defer func() { <-sem }()
-			r, e := Remote(ctx, host, c)
-			ch <- result{host: host, rows: r, err: e}
-		}(host)
-	}
-	if refresh {
-		go func() { wg.Wait(); close(ch) }()
-		for item := range ch {
-			if item.err != nil {
-				errors[item.host.ID] = item.err.Error()
-				rows = append(rows, Cached(item.host)...)
-			} else {
-				if e := Save(item.host, item.rows); e != nil {
-					errors[item.host.ID] = e.Error()
-				}
-				rows = append(rows, item.rows...)
+	if !refresh {
+		for _, host := range c.Hosts {
+			if host.Enabled {
+				rows = append(rows, Cached(host)...)
 			}
 		}
+	} else {
+		RefreshHosts(ctx, c, false, func(item HostResult) {
+			if item.Err != nil {
+				errors[item.Host.ID] = item.Err.Error()
+			}
+			rows = append(rows, item.Records...)
+		})
+	}
+	if err := ctx.Err(); err != nil {
+		errors["refresh"] = err.Error()
 	}
 	order := map[string]int{}
 	for i, h := range c.Hosts {

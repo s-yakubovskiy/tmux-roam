@@ -1,8 +1,8 @@
 # tmux-roam: Go migration implementation plan
 
-Date: 2026-11-07. Status: proposed implementation plan; migration has not started.
+Date: 2026-11-07. Status: Go release candidate implemented; automated acceptance and performance work continue. See [GO_MIGRATION_PROGRESS.md](GO_MIGRATION_PROGRESS.md) for evidence and remaining gates. This development checkout defaults to Go; the production TPM clone remains on Python.
 
-Baseline: commit `5fbfc123a2e99b604aeb3e51ac3e7a81f76386c3` (`integration`). The current implementation has approximately 2,900 lines of runtime Python and 1,600 lines of tests. The last recorded full run passed 34 tests; Stage 0 must rerun them against the frozen baseline.
+Baseline: commit `5fbfc123a2e99b604aeb3e51ac3e7a81f76386c3` (`integration`). The current implementation has approximately 2,900 lines of runtime Python and 1,600 lines of tests. All 34 Python baseline tests pass in the current environment. The explicit Python launcher remains available for coexistence and rollback tests.
 
 This plan covers a complete replacement of the Python runtime. Every current capability must be preserved or replaced by a demonstrably equivalent or better interaction. Performance, clear Go code, and ease of adding features are release criteria. A faster picker with missing lifecycle, configuration-sync, or input behavior is not a completed migration.
 
@@ -20,17 +20,19 @@ Use [README.md](README.md), the implementation, and executable acceptance scenar
 - Keep UI improvements incremental and measurable. Preserve familiar shortcuts, minimal styling, and current cancellation behavior.
 - Introduce no database, plugin/provider framework, custom SSH client, or replacement terminal renderer in this migration.
 
-The first supported release targets Linux AMD64 and ARM64. Validate the actual minimum kernel and tmux requirements rather than assuming static binaries work on every Linux machine. The current workstation uses tmux 3.8; Omni has been verified with tmux 3.6. Capture the current DevDocker versions in Stage 0. Retain the existing tmux-native search fallback where capability detection permits it.
+The first supported release targets Linux AMD64 and ARM64. Validate the actual minimum kernel and tmux requirements rather than assuming static binaries work on every Linux machine. The current workstation uses tmux 3.8/fzf 0.74.5; actual isolated canaries pass on Omni with remote tmux 3.6 and DevDocker with remote tmux 3.6a. AMD64 has runtime evidence; ARM64 currently has cross-build evidence only. Retain the existing tmux-native search fallback where capability detection permits it.
 
 ### Definition of done
 
+Checked items below identify implemented or verified individual requirements. A stage is not complete until all of its exit gates pass; unchecked broader/manual criteria remain open. Evidence is mapped to executable scenarios in the progress report.
+
 - [ ] Every feature in the parity matrix has passing acceptance evidence against Go.
-- [ ] Native navigation, fzf, session lifecycle, config sync, installation, update, unload, and rollback work together.
-- [ ] No Python or Go toolchain is required for newly launched runtime operations, locally or remotely.
+- [x] Native navigation, fzf, session lifecycle, config sync, installation, update, unload, and rollback work together (isolated acceptance).
+- [x] No Python or Go toolchain is required for newly launched Go runtime operations, locally or remotely (static bundles; PATH-restricted install and config-sync acceptance).
 - [ ] Performance gates pass under both healthy and failing-host conditions.
-- [ ] Existing active connections survive backend activation and rollback.
+- [x] Existing active connections survive backend activation and rollback (isolated Python/Go coexistence).
 - [ ] Physical keyboard, touchpad, clipboard, and resize checks pass on the workstation and real remote hosts.
-- [ ] A new maintainer can build, test, trace a command, and add a small action using documented package boundaries.
+- [x] A new maintainer can build, test, trace a command, and add a small action using documented package boundaries (README development guide).
 
 ## 2. Feature parity matrix
 
@@ -143,6 +145,8 @@ Engineering rules:
 
 Numbers below are proposed release targets, not accomplished results. Stage 0 establishes an interleaved Python/Go measurement procedure and records the reference machine and workload. A missed target requires profiling and a documented decision; do not relax it silently or remove correctness checks to meet it.
 
+November 9 scope decision: the user deferred large native mirroring. Automatic mirrors now stop above 100 remote windows per host; session entries and real remote counts remain available. A 25 ms normal native-opening exception is proposed for review; the original 20 ms benchmark gate remains visible. Local selection and every other timing/safety budget retain their existing targets. See [the review and evidence](GO_MIGRATION_PROGRESS.md#native-release-scope-and-timing-review).
+
 Recent baseline measurements on this host: Python-only startup ~22 ms median; installed `--version` ~98 ms; `picker-select` ~76 ms, each over 30 warm runs. Native `/` search became visible at ~200 ms median over six isolated trials. Active Python supervisors showed roughly 21–24 MiB RSS each. These samples are context, not controlled release benchmarks.
 
 | Scenario | Initial target / invariant |
@@ -163,13 +167,13 @@ Recent baseline measurements on this host: Python-only startup ~22 ms median; in
 
 Benchmark method and workload checks:
 
-- [ ] Measure actual PTY output/usable rows, not only process start or popup-border creation.
-- [ ] Capture p50/p95 for at least 30 warm CLI runs and 50 UI trials; record first invocation separately without calling it a cold filesystem benchmark.
-- [ ] Interleave backends on the same machine, recording tmux/fzf versions, terminal size, CPU/load, and build flags.
+- [x] Measure actual PTY output/usable rows, not only process start or popup-border creation (screen reconstruction with pyte).
+- [x] Capture p50/p95 for at least 30 warm CLI runs and 50 UI trials; record first invocation separately without calling it a cold filesystem benchmark.
+- [x] Interleave backends on the same machine, recording tmux/fzf versions, terminal size, CPU/load, and build flags.
 - [ ] Cover empty inventory; normal 20-session inventory; 500 sessions/2,500 cached windows; Unicode/long names; large scrollback.
 - [ ] For the stress dataset, target usable cached search within 250 ms and input p95 within 50 ms; report native-tree cost separately because tmux renders it.
 - [ ] Cover zero latency, controlled added latency, one slow host among fast hosts, unreachable hosts, and cancelled SSH commands.
-- [ ] Record process-launch and SSH-round-trip counts as well as elapsed time. Use profiles/traces to locate excess work.
+- [x] Record process-launch and SSH-round-trip counts as well as elapsed time. Use profiles/traces to locate excess work.
 - [ ] Batch tmux reads/writes and publish only changed snapshots; chunk large updates so the tmux server remains responsive.
 - [ ] Report startup, local computation, external tmux commands, SSH, and fzf rendering separately. Do not attribute network improvements to Go.
 
@@ -183,20 +187,20 @@ Deliverables: immutable Python baseline, feature-to-test map, fixtures, benchmar
 
 Implementation checklist:
 
-- [ ] Record the baseline commit, actual TPM installation path/version, supported local/remote versions, and current configuration schema.
-- [ ] Snapshot the executable behavior of all 20 CLI command names, flags, exit codes, JSON schemas, and callback invocations. Inventory tmux options and environment overrides too.
-- [ ] Assign IDs to the parity matrix and identify which of the existing 34 tests are unit, integration, or manual acceptance scenarios.
-- [ ] Extract external-command acceptance scenarios so they can run against either binary. Existing Python tests that import implementation modules are not automatically Go parity tests.
+- [x] Record the baseline commit, actual TPM installation path/version, supported local/remote versions, and current configuration schema.
+- [x] Snapshot the executable behavior of all 20 CLI command names, flags, exit codes, JSON schemas, and callback invocations. Inventory tmux options and environment overrides too.
+- [x] Assign IDs to the parity matrix and identify which of the existing 34 tests are unit, integration, or manual acceptance scenarios.
+- [x] Extract external-command acceptance scenarios so they can run against either binary. Existing Python tests that import implementation modules are not automatically Go parity tests.
 - [ ] Freeze fixtures for opaque IDs, cache records, connection states, binding ownership, window mirrors, config-sync responses, Unicode, and malformed input.
-- [ ] Create disposable local tmux and SSH test targets. Keep real user sessions out of automated mutation tests.
+- [x] Create disposable local tmux and SSH test targets. Keep real user sessions out of automated mutation tests.
 - [ ] Establish performance baselines using the method above; store commands and results in the repository.
 
 Check before advancing:
 
-- [ ] The baseline suite passes and known failures are explicitly recorded.
-- [ ] Every matrix row has a planned executable or manual acceptance check; undocumented behavior is resolved from source and observed behavior.
-- [ ] The harness can detect wrong-client switching, wrong-session targeting, orphaned children, unwanted SSH, and modified user panes.
-- [ ] Existing configs run unmodified; no migration code has been activated on the workstation.
+- [x] The baseline suite passes and known failures are explicitly recorded.
+- [x] Every matrix row has a planned executable or manual acceptance check; undocumented behavior is resolved from source and observed behavior.
+- [x] The harness can detect wrong-client switching, wrong-session targeting, orphaned children, unwanted SSH, and modified user panes.
+- [x] Existing configs run unmodified; no migration code has been activated on the workstation.
 
 Exit gate: an executable definition of parity and a trustworthy performance comparison exist.
 
@@ -206,24 +210,24 @@ Deliverables: buildable CLI, strict configuration, domain types, process/tmux ad
 
 Implementation checklist:
 
-- [ ] Pin a stable supported Go toolchain; add module metadata, reproducible build commands, formatting, vetting, race tests, and CI.
-- [ ] Implement command routing and shared error/exit-code handling. Preserve JSON stdout and put diagnostics on stderr.
-- [ ] Implement all current configuration fields and defaults: picker width/height/details/icons/hide patterns; discovery cache/refresh/connect/command timeouts/concurrency; host id/label/ssh/enabled/tmux path/prefix/socket selectors.
-- [ ] Preserve strict types/ranges, missing-config behavior, unknown-key rejection, duplicate host rejection, and path resolution.
-- [ ] Define typed identity/observation/connection models. Separate observation freshness from connection state.
-- [ ] Implement bounded command capture, timeouts, cancellation, process cleanup, and separate terminal-child execution rules.
-- [ ] Implement atomic private state/cache files and interoperable Unix locks, using the current namespace and permissions.
-- [ ] Preserve relevant environment contracts: config path, SSH config, XDG paths, tmux socket, invoking client, columns, and deterministic executable selection. Treat `TMUX_ROAM_PYTHON` as a legacy-backend option only.
+- [x] Pin a stable supported Go toolchain; add module metadata, reproducible build commands, formatting, vetting, race tests, and CI.
+- [x] Implement command routing and shared error/exit-code handling. Preserve JSON stdout and put diagnostics on stderr.
+- [x] Implement all current configuration fields and defaults: picker width/height/details/icons/hide patterns; discovery cache/refresh/connect/command timeouts/concurrency; host id/label/ssh/enabled/tmux path/prefix/socket selectors.
+- [x] Preserve strict types/ranges, missing-config behavior, unknown-key rejection, duplicate host rejection, and path resolution.
+- [x] Define typed identity/observation/connection models. Separate observation freshness from connection state.
+- [x] Implement bounded command capture, timeouts, cancellation, process cleanup, and separate terminal-child execution rules.
+- [x] Implement atomic private state/cache files and interoperable Unix locks, using the current namespace and permissions.
+- [x] Preserve relevant environment contracts: config path, SSH config, XDG paths, tmux socket, invoking client, columns, and deterministic executable selection. Treat `TMUX_ROAM_PYTHON` as a legacy-backend option only.
 
 Check before advancing:
 
-- [ ] Current configuration fixtures succeed or fail identically, including booleans passed where integers are required and `socket_name`/`socket_path` conflicts.
-- [ ] Opaque IDs are byte-compatible with Python, including JSON escaping, Unicode/surrogates, URL-safe base64, and omitted padding. Go's default JSON encoding is not assumed equivalent.
-- [ ] Cache/state records round-trip between implementations. Old readers are tested before introducing additional fields.
-- [ ] Corrupt/truncated cache data is disposable; ownership information is never inferred from corrupt state.
-- [ ] Shell metacharacters, tmux format markers, leading dashes, spaces, pipes, and control characters cannot change the intended command or target.
-- [ ] Cancellation reaps descendants without killing unrelated SSH masters or another connection's supervisor.
-- [ ] CLI startup meets its budget; ordinary parsing creates no network connections.
+- [x] Current configuration fixtures succeed or fail identically, including booleans passed where integers are required and `socket_name`/`socket_path` conflicts.
+- [x] Opaque IDs are byte-compatible with Python, including JSON escaping, Unicode/surrogates, URL-safe base64, and omitted padding. Go's default JSON encoding is not assumed equivalent.
+- [x] Cache/state records round-trip between implementations. Old readers are tested before introducing additional fields.
+- [x] Corrupt/truncated cache data is disposable; ownership information is never inferred from corrupt state.
+- [x] Shell metacharacters, tmux format markers, leading dashes, spaces, pipes, and control characters cannot change the intended command or target.
+- [x] Cancellation reaps descendants without killing unrelated SSH masters or another connection's supervisor.
+- [x] CLI startup meets its budget; ordinary parsing creates no network connections.
 
 Exit gate: the foundation supports real command execution and existing data without changing the host installation.
 
@@ -233,25 +237,27 @@ Deliverables: compatible `list`, `list --cached`, `refresh`, and inventory diagn
 
 Implementation checklist:
 
-- [ ] Port local discovery and folding of owned connection sessions.
+- [x] Port local discovery and folding of owned connection sessions.
 - [ ] Build indexed snapshots for identity, carrier ownership, client, and window lookups. Avoid repeated whole-inventory scans and a separate tmux subprocess for every rendered field.
-- [ ] Port one bounded remote snapshot containing server/session identity, clients, prefixes, and remote windows.
-- [ ] Use OpenSSH for aliases, Include, ProxyJump, keys/agents, ports, and host-key policy. Retain BatchMode and the current private ControlMaster behavior.
-- [ ] Preserve ordinary-SSH fallback when a private control-socket path is too long.
-- [ ] Schedule hosts with bounded concurrency, publish completed hosts independently, and keep cached data after failures.
-- [ ] Preserve remote-client reconciliation when a user changes sessions inside the remote server.
-- [ ] Coalesce refresh requests and serialize same-host cache publication. For cross-process coordination, allow cancellation and avoid an unresponsive host becoming a global lock.
-- [ ] Define freshness using elapsed time carefully; tolerate wall-clock changes and retain the last successful observation age.
+- [x] Port one bounded remote snapshot containing server/session identity, clients, prefixes, and remote windows.
+- [x] Use OpenSSH for aliases, Include, ProxyJump, keys/agents, ports, and host-key policy. Retain BatchMode and the current private ControlMaster behavior.
+- [x] Preserve ordinary-SSH fallback when a private control-socket path is too long.
+- [x] Schedule hosts with bounded concurrency, publish completed hosts independently, and keep cached data after failures.
+- [x] Preserve remote-client reconciliation when a user changes sessions inside the remote server.
+- [x] Coalesce refresh requests and serialize same-host cache publication. For cross-process coordination, allow cancellation and avoid an unresponsive host becoming a global lock.
+- [x] Define freshness using elapsed time carefully; tolerate wall-clock changes and retain the last successful observation age.
 
 Check before advancing:
 
-- [ ] Python and Go produce semantically equivalent JSON for local, healthy, empty, offline, disabled, stale, restarted-server, and malformed-response scenarios.
-- [ ] `list --cached` makes zero SSH calls.
-- [ ] A failed host does not delay another host's results or erase its own cached rows.
-- [ ] Large/truncated output, authentication failures, missing tmux, Unicode, and hostile labels remain bounded and actionable.
-- [ ] Host concurrency and refresh intervals match configuration; close cancels active work and prevents later publication.
-- [ ] Same-host concurrent readers/writers do not lose newer observations or create partially written records.
-- [ ] Discovery and cache-hit timings, subprocess counts, and output limits are recorded.
+- [x] Python and Go produce semantically equivalent JSON for local, healthy, empty, offline, disabled, stale, restarted-server, and malformed-response scenarios.
+- [x] `list --cached` makes zero SSH calls.
+- [x] A failed host does not delay another host's results or erase its own cached rows.
+- [x] Large/truncated output, authentication failures, missing tmux, Unicode, and hostile labels remain bounded and actionable.
+- [x] Host concurrency and refresh intervals match configuration; close cancels active work and prevents later publication.
+- [x] Same-host concurrent readers/writers do not lose newer observations or create partially written records.
+- [x] Discovery and cache-hit timings, subprocess counts, and output limits are recorded.
+
+Current refresh evidence: overlapping observations coalesce both within an invocation and across processes through private temporary Unix sockets. Per-host cache publication remains short and cancellable. Actual pickers refresh periodically and stop/join workers on close. Real-SSH fixtures cover Include, ProxyJump and isolated ssh-agent authentication in addition to aliases, host trust, ports, quoted executables and socket targeting. CLI inventory and reconstructed PTY first-frame measurements are reported separately in GO_MIGRATION_PROGRESS.md.
 
 Exit gate: read-only feature parity and failure behavior pass through the CLI.
 
@@ -261,25 +267,25 @@ Deliverables: exact remote open/reuse, explicit retry, safe cleanup, and a Go su
 
 Implementation checklist:
 
-- [ ] Specify and implement transitions for dormant, preparing/attaching, open, disconnected, and error states. Ending a remote session is distinct from losing network visibility.
-- [ ] Preserve the identity tuple: host ID, actual remote socket, server PID/start time, session ID, and session creation time.
-- [ ] Reuse only an ownership-checked carrier whose remote PID/TTY confirms the selected identity; prefer a healthy match over failed duplicates.
-- [ ] Port per-target creation ownership, follower behavior, short locks, and cancellation/navigation generations.
-- [ ] Reconnect in the original safe carrier/pane. Confirm ownership again immediately before respawn or removal.
-- [ ] Keep SSH stdin attached to the terminal; parse only the bounded nonce prelude from stdout, then relay bytes with backpressure.
-- [ ] Handle resize, terminal signals, EOF, partial writes, SSH failure, and retry prompt without corrupting terminal state.
-- [ ] Preserve the deliberate shared-view semantics when two local clients attach to the same carrier.
+- [x] Specify and implement transitions for dormant, preparing/attaching, open, disconnected, and error states. Ending a remote session is distinct from losing network visibility.
+- [x] Preserve the identity tuple: host ID, actual remote socket, server PID/start time, session ID, and session creation time.
+- [x] Reuse only an ownership-checked carrier whose remote PID/TTY confirms the selected identity; prefer a healthy match over failed duplicates.
+- [x] Port per-target creation ownership, follower behavior, short locks, and cancellation/navigation generations.
+- [x] Reconnect in the original safe carrier/pane. Confirm ownership again immediately before respawn or removal.
+- [x] Keep SSH stdin attached to the terminal; parse only the bounded nonce prelude from stdout, then relay bytes with backpressure.
+- [x] Handle resize, terminal signals, EOF, partial writes, SSH failure, and retry prompt without corrupting terminal state.
+- [x] Preserve the deliberate shared-view semantics when two local clients attach to the same carrier.
 
 Check before advancing:
 
-- [ ] Healthy reopen reuses one carrier and one remote attachment; repeated failed retries preserve the same session/pane.
-- [ ] Network restoration permits Enter or picker selection to retry the exact session. No unrequested automatic reconnect loop is added.
-- [ ] A deleted/recreated same-name session and a restarted remote server cannot be mistaken for the original identity.
-- [ ] Two concurrent opens create at most one owned carrier; cancelling a follower does not tear down the owner's successful connection.
-- [ ] Cancellation, client disappearance, or a newer navigation request prevents late focus changes.
-- [ ] Failure cleanup preserves attached, renamed, split, linked, or repurposed resources and all unrelated sessions.
-- [ ] Sustained output, split escape sequences, OSC 52, UTF-8, Ctrl-c, resize, editor alternate screen, and SSH exit are tested through a PTY.
-- [ ] Supervisor memory and resource counts stabilize; no terminal traffic enters diagnostic logs.
+- [x] Healthy reopen reuses one carrier and one remote attachment; repeated failed retries preserve the same session/pane.
+- [x] Network restoration permits Enter or picker selection to retry the exact session. No unrequested automatic reconnect loop is added.
+- [x] A deleted/recreated same-name session and a restarted remote server cannot be mistaken for the original identity.
+- [x] Two concurrent opens create at most one owned carrier; cancelling a follower does not tear down the owner's successful connection.
+- [x] Cancellation, client disappearance, or a newer navigation request prevents late focus changes.
+- [x] Failure cleanup preserves attached, renamed, split, linked, or repurposed resources and all unrelated sessions.
+- [x] Sustained output, split escape sequences, OSC 52, UTF-8, Ctrl-c, resize, editor alternate screen, and SSH exit are tested through a PTY.
+- [x] Supervisor memory and resource counts stabilize; no terminal traffic enters diagnostic logs (31 samples across 30 reconnects, roughly 8–9 MiB RSS and eight FDs; the long-lived soak remains open).
 
 Exit gate: lifecycle acceptance passes on disposable SSH targets, including outage/recovery loops, before connecting the Go implementation to normal work sessions.
 
@@ -289,24 +295,24 @@ Deliverables: native picker parity and all input routing through Go-generated tm
 
 Implementation checklist:
 
-- [ ] Port idempotent install/unload, original binding capture, canonical comparison, later-user-edit preservation, extra tables, and namespaced hooks.
-- [ ] Preserve native foreground opening/local selection with direct tmux commands; start metadata work asynchronously.
-- [ ] Preserve all interaction-contract aliases and remote prefix variants. Global previous-session switching must work from both ordinary and managed sessions.
-- [ ] Keep all mouse events routed through tmux's mouse forwarding; do not route them through the Go process.
-- [ ] Port dormant session entries, ownership decoration, cached states, and safe ended/duplicate cleanup.
-- [ ] Port remote window mirrors, exact child-window targeting, reserved carrier index handling, and safe removal before attachment.
-- [ ] Batch repeated option reads/writes and skip identical updates; retain selection, expansion, scroll position, and current-session markers.
-- [ ] Keep the configured native search capability fallback and plain-tree alternative.
+- [x] Port idempotent install/unload, original binding capture, canonical comparison, later-user-edit preservation, extra tables, and namespaced hooks.
+- [x] Preserve native foreground opening/local selection with direct tmux commands; start metadata work asynchronously.
+- [x] Preserve all interaction-contract aliases and remote prefix variants. Global previous-session switching must work from both ordinary and managed sessions.
+- [x] Keep all mouse events routed through tmux's mouse forwarding; do not route them through the Go process.
+- [x] Port dormant session entries, ownership decoration, cached states, and safe ended/duplicate cleanup.
+- [x] Port remote window mirrors, exact child-window targeting, reserved carrier index handling, and safe removal before attachment.
+- [x] Batch repeated option reads/writes and skip identical updates; retain selection, expansion, scroll position, and current-session markers.
+- [x] Keep the configured native search capability fallback and plain-tree alternative.
 
 Check before advancing:
 
-- [ ] English/Russian pickers and previous-session toggle work from local, `off-prefix`, and all managed prefix tables.
-- [ ] Double-prefix behavior and F12 escape work with `M-a`, `C-b`, and `None` without changing remote configuration.
-- [ ] Repeated install/unload and changing configured keys restore originals without leaking obsolete bindings or overwriting later user edits.
-- [ ] Native local selection still works instantly when the Go executable or SSH discovery is intentionally stalled.
-- [ ] Remote child rows remain useful during outages; selecting a deleted/moved window fails safely.
-- [ ] Attached or user-modified windows/panes are never removed as metadata mirrors.
-- [ ] Double-click, drag, wheel, pane/app clicks, remote vi copy mode, and OSC 52 pass in isolated tests and on disposable real-host servers.
+- [x] English/Russian pickers and previous-session toggle work from local, `off-prefix`, and all managed prefix tables.
+- [x] Double-prefix behavior and F12 escape work with `M-a`, `C-b`, and `None` without changing remote configuration.
+- [x] Repeated install/unload and changing configured keys restore originals without leaking obsolete bindings or overwriting later user edits.
+- [x] Native local selection still works instantly when the Go executable or SSH discovery is intentionally stalled.
+- [x] Remote child rows remain useful during outages; selecting a deleted/moved window fails safely.
+- [x] Attached or user-modified windows/panes are never removed as metadata mirrors.
+- [x] Double-click, drag, wheel, pane/app clicks, remote vi copy mode, and OSC 52 pass in isolated tests and on disposable real-host servers.
 - [ ] Native timing budgets hold while large background updates are being published.
 
 Exit gate: `Alt+a s` and global routing are fully usable with Go on an isolated server.
@@ -317,22 +323,22 @@ Deliverables: fzf behavior parity, shared view models, and deterministic popup l
 
 Implementation checklist:
 
-- [ ] Build cached rows once and launch fzf directly; avoid a second controller startup inside the popup.
-- [ ] Preserve opaque IDs, NUL framing, identity tracking, stable ordering, query text, and selection through refresh.
-- [ ] Share formatting/state mapping across native and fzf views while retaining each view's distinct interaction model.
-- [ ] Preserve search-first manager, Escape-to-close, Ctrl-o navigation, nested-menu behavior, and lower-search Escape-to-tree behavior.
-- [ ] Port filter/hidden/details/help/refresh controls and literal Latin/Cyrillic search input.
-- [ ] Keep full-path fuzzy matching such as `DD/git`; do not let metadata or transient status dominate project matching.
-- [ ] Preserve terminal-cell alignment, emoji/combining/ZWJ text, adaptive columns, side padding, current `*`, and an unambiguous selected row.
-- [ ] Ignore behavioral `FZF_DEFAULT_*` overrides consistently and retain too-small-terminal fallback.
-- [ ] Scope workers, snapshots, and Unix sockets to the invocation. Add no persistent controller just to reduce launch overhead.
+- [x] Build cached rows once and launch fzf directly; avoid a second controller startup inside the popup.
+- [x] Preserve opaque IDs, NUL framing, identity tracking, stable ordering, query text, and selection through refresh.
+- [x] Share formatting/state mapping across native and fzf views while retaining each view's distinct interaction model.
+- [x] Preserve search-first manager, Escape-to-close, Ctrl-o navigation, nested-menu behavior, and lower-search Escape-to-tree behavior.
+- [x] Port filter/hidden/details/help/refresh controls and literal Latin/Cyrillic search input.
+- [x] Keep full-path fuzzy matching such as `DD/git`; do not let metadata or transient status dominate project matching.
+- [x] Preserve terminal-cell alignment, emoji/combining/ZWJ text, adaptive columns, side padding, current `*`, and an unambiguous selected row.
+- [x] Ignore behavioral `FZF_DEFAULT_*` overrides consistently and retain too-small-terminal fallback.
+- [x] Scope workers, snapshots, and Unix sockets to the invocation. Add no persistent controller just to reduce launch overhead.
 
 Check before advancing:
 
-- [ ] PTY tests cover empty/matching/no-match searches; immediate Escape; both toggle aliases; nested menus; and form cancellation.
-- [ ] `/` appears in the preview area with the tree retained above it; return preserves exact selection and expansion.
-- [ ] Typed `j/k`, `dd`, Cyrillic equivalents, `/`, and `.` remain literal while searching.
-- [ ] Background updates neither erase the query nor silently select a different identity when the chosen row ends.
+- [x] PTY tests cover empty/matching/no-match searches; immediate Escape; both toggle aliases; nested menus; and form cancellation.
+- [x] `/` appears in the preview area with the tree retained above it; return preserves exact selection and expansion.
+- [x] Typed `j/k`, `dd`, Cyrillic equivalents, `/`, and `.` remain literal while searching.
+- [x] Background updates neither erase the query nor silently select a different identity when the chosen row ends.
 - [ ] Small terminals, resize while open, many rows, and Unicode screenshots remain readable and aligned.
 - [ ] First usable frame, typing, local selection, Escape, and worker cleanup meet the specified budgets.
 
@@ -344,23 +350,23 @@ Deliverables: creation, deletion, refresh-host, disconnect, and diagnostics from
 
 Implementation checklist:
 
-- [ ] Port host selection, session naming rules, remote directory validation/expansion, explicit creation, and opening the returned exact identity.
-- [ ] Port deletion confirmation, `dd`/`вв`, and F2 deletion for both local and remote sessions.
-- [ ] Perform destructive identity validation and mutation in the same remote/local tmux command queue.
-- [ ] Update both pickers after successful creation/deletion and safely prune associated ended local carriers.
-- [ ] Preserve close-local-connection as a distinct action, including protection for carriers still used by clients.
-- [ ] Port all F2 actions, context-sensitive preferred host, help, and diagnostics; keep one underlying operation per action.
+- [x] Port host selection, session naming rules, remote directory validation/expansion, explicit creation, and opening the returned exact identity.
+- [x] Port deletion confirmation, `dd`/`вв`, and F2 deletion for both local and remote sessions.
+- [x] Perform destructive identity validation and mutation in the same remote/local tmux command queue.
+- [x] Update both pickers after successful creation/deletion and safely prune associated ended local carriers.
+- [x] Preserve close-local-connection as a distinct action, including protection for carriers still used by clients.
+- [x] Port all F2 actions, context-sensitive preferred host, help, and diagnostics; keep one underlying operation per action.
 
 Check before advancing:
 
-- [ ] Create two independent projects on one remote host and switch between them normally.
-- [ ] Existing names, missing directories, leading dashes, shell metacharacters, invalid names, and cancelled forms cannot overwrite unrelated work.
-- [ ] A lost creation/deletion response is reported as an uncertain outcome; refresh before retrying rather than claiming success or issuing a blind second mutation.
-- [ ] Cancel remains the initial destructive-confirmation choice; opening a menu or searching never creates/deletes a session.
-- [ ] `dd` requires two consecutive navigation-mode presses; unrelated input breaks it.
-- [ ] Successful deletion disappears from the native picker as well as the manager; an offline host never supplies deletion evidence.
-- [ ] Closing an owned local connection leaves its remote session alive under the remote server's own lifecycle policy.
-- [ ] The popup toggle works throughout menus, confirmations, and input fields on both layouts.
+- [x] Create two independent projects on one remote host and switch between them normally.
+- [x] Existing names, missing directories, leading dashes, shell metacharacters, invalid names, and cancelled forms cannot overwrite unrelated work.
+- [x] A lost creation/deletion response is reported as an uncertain outcome; refresh before retrying rather than claiming success or issuing a blind second mutation.
+- [x] Cancel remains the initial destructive-confirmation choice; opening a menu or searching never creates/deletes a session.
+- [x] `dd` requires two consecutive navigation-mode presses; unrelated input breaks it.
+- [x] Successful deletion disappears from the native picker as well as the manager; an offline host never supplies deletion evidence.
+- [x] Closing an owned local connection leaves its remote session alive under the remote server's own lifecycle policy.
+- [x] The popup toggle works throughout menus, confirmations, and input fields on both layouts.
 
 Exit gate: every current action except config sync has backend and interaction parity.
 
@@ -370,29 +376,29 @@ Deliverables: Go config-sync transaction, temporary remote helper, CLI/UI previe
 
 Implementation checklist:
 
-- [ ] Port `config diff/sync <host>`, `--all`, `--source`, existing exit codes, enabled-host filtering, and continued processing after one host fails.
-- [ ] Share transaction logic between a small `tmux-roam-agent` entry point and the local coordinator; do not create a general-purpose remote agent API.
-- [ ] Version the helper request/response protocol and reject incompatible versions before mutation. Preserve the 1 MiB config limit; separately bound the packaged helper/archive size and JSON response rather than applying the config limit to executable bytes.
-- [ ] Build static helper artifacts for supported remote architectures. Ship them with the release bundle so syncing does not require the remote host to download from the internet.
-- [ ] Detect remote OS/architecture only for explicit sync/diff. Reject unsupported targets before changing `.tmux.conf`.
-- [ ] Transfer a bounded archive containing only the trusted helper and JSON request through OpenSSH. Use fixed member names, a private staging directory, a shell cleanup trap, and a JSON-only helper response. Document the added standard `sh`/`tar` bootstrap requirements.
-- [ ] Keep the helper/request temporary. Handle disconnects with best-effort cleanup and narrowly scoped stale-staging cleanup; no permanent agent or periodic service.
-- [ ] Preserve destination symlinks, file permissions, same-filesystem atomic replacement, backups, locking, and preview/content digest checks before commit.
-- [ ] Validate using the destination's tmux executable on an isolated server; reload only the configured live socket, or save for its next start.
-- [ ] Bound and clean up the temporary validation server on success, failure, timeout, and cancellation; its private socket must never be confused with the live destination socket.
-- [ ] Restore the previous file after reload failure and report whether its reload succeeded. Continue to explain that arbitrary effects of sourced shell commands cannot be rolled back.
-- [ ] Preserve F2 host/all-host selection, diff scrolling, default Cancel, and stale-preview refusal.
+- [x] Port `config diff/sync <host>`, `--all`, `--source`, existing exit codes, enabled-host filtering, and continued processing after one host fails.
+- [x] Share transaction logic between a small `tmux-roam-agent` entry point and the local coordinator; do not create a general-purpose remote agent API.
+- [x] Version the helper request/response protocol and reject incompatible versions before mutation. Preserve the 1 MiB config limit; separately bound the packaged helper/archive size and JSON response rather than applying the config limit to executable bytes.
+- [x] Build static helper artifacts for supported remote architectures. Ship them with the release bundle so syncing does not require the remote host to download from the internet.
+- [x] Detect remote OS/architecture only for explicit sync/diff. Reject unsupported targets before changing `.tmux.conf`.
+- [x] Transfer a bounded archive containing only the trusted helper and JSON request through OpenSSH. Use fixed member names, a private staging directory, a shell cleanup trap, and a JSON-only helper response. Document the added standard `sh`/`tar` bootstrap requirements.
+- [x] Keep the helper/request temporary. Handle disconnects with best-effort cleanup and narrowly scoped stale-staging cleanup; no permanent agent or periodic service.
+- [x] Preserve destination symlinks, file permissions, same-filesystem atomic replacement, backups, locking, and preview/content digest checks before commit.
+- [x] Validate using the destination's tmux executable on an isolated server; reload only the configured live socket, or save for its next start.
+- [x] Bound and clean up the temporary validation server on success, failure, timeout, and cancellation; its private socket must never be confused with the live destination socket.
+- [x] Restore the previous file after reload failure and report whether its reload succeeded. Continue to explain that arbitrary effects of sourced shell commands cannot be rolled back.
+- [x] Preserve F2 host/all-host selection, diff scrolling, default Cancel, and stale-preview refusal.
 
 Check before advancing:
 
-- [ ] Diff and sync work when Python and Go are absent from the destination PATH, including the real DevDocker compatibility target.
-- [ ] Matching files skip writes/backups; changed files preserve mode and symlinks and create an accurate backup.
-- [ ] Missing config, stopped server, invalid syntax, runtime reload failure, concurrent edits, and concurrent sync attempts have explicit tested results.
-- [ ] Truncated transfer/response, noexec staging, insufficient disk space, permissions, timeout, and disconnect do not produce a partial installed config or false success.
-- [ ] Preview-to-apply changes are rejected; symlink/target changes during the transaction are checked before replacement.
-- [ ] Only `.tmux.conf`, its expected backup/lock state, and temporary helper files are affected. Do not distribute plugin config, scripts, or plugins implicitly.
-- [ ] Repeated calls leave no running helpers or accumulating staging directories; unsupported platforms fail before config mutation.
-- [ ] Full sync UX is tested over SSH against disposable targets with existing sessions preserved.
+- [x] Diff and sync work when Python and Go are absent from the destination PATH, including the real DevDocker compatibility target.
+- [x] Matching files skip writes/backups; changed files preserve mode and symlinks and create an accurate backup.
+- [x] Missing config, stopped server, invalid syntax, runtime reload failure, concurrent edits, and concurrent sync attempts have explicit tested results.
+- [x] Truncated transfer/response, noexec staging, insufficient disk space, permissions, timeout, and disconnect do not produce a partial installed config or false success.
+- [x] Preview-to-apply changes are rejected; symlink/target changes during the transaction are checked before replacement.
+- [x] Only `.tmux.conf`, its expected backup/lock state, and temporary helper files are affected. Do not distribute plugin config, scripts, or plugins implicitly.
+- [x] Repeated calls leave no running helpers or accumulating staging directories; unsupported platforms fail before config mutation.
+- [x] Full sync UX is tested over SSH against disposable targets with existing sessions preserved (generated F2 host/all-host previews, diff scrolling/default Cancel, stale-preview refusal and successful apply; physical acceptance remains separate).
 
 Exit gate: no runtime feature requires Python. The legacy helper can remain only in the rollback implementation.
 
@@ -402,14 +408,14 @@ Deliverables: measured interaction improvements, profiles, performance regressio
 
 Implement improvements that fit the established views:
 
-- [ ] Use one semantic status model/color map across views: current, connected, ready, checking, connecting, reconnect, unavailable, ended. Host accent colors never imply connection health.
+- [x] Use one semantic status model/color map across views: current, connected, ready, checking, connecting, reconnect, unavailable, ended. Host accent colors never imply connection health.
 - [ ] Present `Host/project` paths consistently; use metadata and observation age without crowding the project name.
 - [ ] Keep cached lists visible during refresh and expose a lightweight per-host refresh indicator without flashing or repeated empty frames.
-- [ ] Make long validation/connection steps visibly cancellable. Retain a clear route back to the selected entry and do not move the invoking client until commit succeeds.
-- [ ] Preserve the user's query and selection on recoverable failures; show short actionable errors with technical details available separately.
-- [ ] Keep confirmations explicit about host/project and local disconnect versus remote deletion. Ensure focus and Cancel defaults are obvious.
-- [ ] Keep plain backgrounds, restrained text accents, compact rows, and padding around header/footer; retain the bottom preview/search design.
-- [ ] Ensure no-match states provide useful refresh/create actions without reinterpreting Enter as creation.
+- [x] Make long validation/connection steps visibly cancellable. Retain a clear route back to the selected entry and do not move the invoking client until commit succeeds.
+- [x] Preserve the user's query and selection on recoverable failures; show short actionable errors with technical details available separately.
+- [x] Keep confirmations explicit about host/project and local disconnect versus remote deletion. Ensure focus and Cancel defaults are obvious.
+- [x] Keep plain backgrounds, restrained text accents, compact rows, and padding around header/footer; retain the bottom preview/search design.
+- [x] Ensure no-match states provide useful refresh/create actions without reinterpreting Enter as creation.
 
 Implementation constraints:
 
@@ -420,10 +426,10 @@ Implementation constraints:
 Check before advancing:
 
 - [ ] All normal and stress performance cases pass, with reports reproducible from checked-in commands.
-- [ ] Healthy local navigation remains fast while every remote host is offline or hung.
+- [ ] Healthy local navigation remains fast while every remote host is offline or hung (November 9: typing, selection, Escape and cancellation pass; normal fuzzy opening passes in the lower-load repeat but earlier cases miss, and native opening with 100 hydrated mirrors still misses the 20 ms p95 target).
 - [ ] Run at least 100 open/search/cancel cycles and 30 reconnect cycles; inspect memory, FDs, goroutines, processes, state files, and tmux hooks.
 - [ ] Profiles identify no unexplained blocking operation on the first-frame or typing path.
-- [ ] Race detector, parser/identity/quoting fuzz tests, and cancellation tests pass; success does not replace PTY/SSH acceptance.
+- [x] Race detector, parser/identity/quoting fuzz tests, and cancellation tests pass; success does not replace PTY/SSH acceptance.
 - [ ] Compare compact and wide layouts, Unicode, disabled icons, both keyboard layouts, and physical touchpad/clipboard behavior.
 - [ ] Record manual acceptance for each changed interaction. A capability-shaped setting such as `icons` must have a visible, tested effect rather than merely parse successfully.
 
@@ -437,24 +443,25 @@ Implementation checklist:
 
 - [ ] Cross-build controller and helper artifacts with CGO disabled; inspect linkage and test on the oldest supported runtime targets.
 - [ ] Publish controller bundles for local AMD64/ARM64, containing the supported remote helper artifacts and a manifest with version/build identity and checksums.
-- [ ] Pin expected release identity in the source checkout. The launcher never silently runs an unrelated executable found earlier in PATH.
-- [ ] Install immutable release directories and atomically activate a verified bundle. Controller and helper versions must stay paired.
-- [ ] Keep the `.tmux` TPM entry point and explicit source-build/manual-install path. End users do not need a compiler.
-- [ ] Keep downloads/builds off ordinary shell startup and picker paths. A first install may fetch in a bounded background task and integrate only after completion; failure preserves the existing chooser. Existing installations keep the last working bundle until an update succeeds.
-- [ ] Document development-checkout behavior when no published release matches it: explicit local build, not an invisible background compiler invocation.
-- [ ] Keep a previous verified release for rollback; protect updates with an installation lock.
-- [ ] Extend `doctor` with binary provenance, capabilities, configured paths, host-specific errors, and optional timing output. Distinguish offline hosts from missing local dependencies.
-- [ ] Document installation, TPM updates, disable/unload, rollback, supported platform versions, config-sync helper behavior, and adding a feature to the Go codebase.
+- [x] Pin expected release identity in the source checkout. The launcher never silently runs an unrelated executable found earlier in PATH.
+- [x] Install immutable release directories and atomically activate a verified bundle. Controller and helper versions must stay paired.
+- [x] Keep the `.tmux` TPM entry point and explicit source-build/manual-install path. End users do not need a compiler.
+- [x] Keep downloads/builds off ordinary shell startup and picker paths. A first install may fetch in a bounded background task and integrate only after completion; failure preserves the existing chooser. Existing installations keep the last working bundle until an update succeeds.
+- [x] Document development-checkout behavior when no published release matches it: explicit local build, not an invisible background compiler invocation.
+- [x] Keep a previous verified release for rollback; protect updates with an installation lock.
+- [x] Extend `doctor` with binary provenance, capabilities, configured paths, host-specific errors, and optional timing output. Distinguish offline hosts from missing local dependencies.
+- [x] Document installation, TPM updates, disable/unload, rollback, supported platform versions, config-sync helper behavior, and adding a feature to the Go codebase.
+- [x] Require local tmux 3.8+ before remote opens/native metadata. Actual local 3.6a reconnects crash in upstream pane-offset handling; the 3.8 fix is absent from inspected 3.7 source. Verify safe refusal with a newer client against the older server, preserve local switching, and retain remote 3.6/3.6a support. See the progress report's compatibility evidence.
 
 Check before advancing:
 
 - [ ] Clean-machine TPM and manual installs work without Python or Go; native/fzf dependencies are checked with actionable errors.
-- [ ] Install/update works from arbitrary working directories and polluted PATHs; project files cannot shadow the runtime.
-- [ ] Offline, interrupted, corrupt, mismatched-version, unsupported-architecture, and concurrent updates preserve the last usable installation.
-- [ ] Release checksums/build identity are verified before activation; the release trust/checksum source is documented.
-- [ ] Updating/unloading never kills a live carrier, resets another client's navigation, or overwrites later user bindings.
-- [ ] Repeated tmux config reloads do not download, rebuild, duplicate hooks, or accumulate processes.
-- [ ] A reviewer can follow one complete feature from CLI through domain operation to adapter and acceptance test.
+- [x] Install/update works from arbitrary working directories and polluted PATHs; project files cannot shadow the runtime.
+- [x] Offline, interrupted, corrupt, mismatched-version, unsupported-architecture, and concurrent updates preserve the last usable installation (offline bundle/bootstrap acceptance).
+- [x] Release checksums/build identity are verified before activation; the release trust/checksum source is documented.
+- [x] Updating/unloading never kills a live carrier, resets another client's navigation, or overwrites later user bindings.
+- [x] Repeated tmux config reloads do not download, rebuild, duplicate hooks, or accumulate processes.
+- [x] A reviewer can follow one complete feature from CLI through domain operation to adapter and acceptance test.
 
 Exit gate: a release candidate can be installed, updated, disabled, and rolled back by a normal TPM user.
 
@@ -464,10 +471,10 @@ Deliverables: staged activation, verified real-host behavior, rollback evidence,
 
 Implementation checklist:
 
-- [ ] Test Python→Go→Python against compatible caches, state files, binding ownership, and existing carriers before changing the workstation default.
+- [x] Test Python→Go→Python against compatible caches, state files, binding ownership, and existing carriers before changing the workstation default.
 - [ ] Keep immutable baseline artifacts. During migration retain any Python source paths still needed by running legacy supervisors; changing a launcher does not migrate an already-running process.
-- [ ] Use an explicit backend selection or isolated launcher for comparison; do not let both backends refresh/mutate the same resources as independent owners.
-- [ ] Run an isolated workstation client and disposable Omni/DevDocker targets first, including config sync on disposable homes/sockets.
+- [x] Use an explicit backend selection or isolated launcher for comparison; do not let both backends refresh/mutate the same resources as independent owners.
+- [x] Run an isolated workstation client and disposable Omni/DevDocker targets first, including config sync on disposable homes/sockets (final-binary repeats pass on both hosts at the default fixture timeout, with existing default-server session identities preserved).
 - [ ] Activate Go on the workstation only after prior stage gates pass, with an immediate rollback command and known prior bindings/artifact.
 - [ ] Observe an agreed soak period, initially two working days including a genuine network interruption/recovery and a suspend/resume cycle when available.
 - [ ] Retire legacy runtime source only after compatibility tests pass and no running supervisor still depends on it. Do not force-close sessions to reach this condition.
@@ -482,7 +489,7 @@ Check before declaring migration complete:
 - [ ] Physical Latin/Russian keyboard and touchpad acceptance is recorded separately from generated PTY input.
 - [ ] The new runtime and installation work with Python removed from the test environment; developer-only test tooling is clearly distinguished.
 - [ ] No unexplained parity, performance, cancellation, or ownership failures remain. Every exception has a documented equivalent behavior and acceptance evidence.
-- [ ] Rollback was actually exercised, not only documented.
+- [x] Rollback was actually exercised, not only documented (isolated release and backend coexistence acceptance; production activation remains pending).
 
 Exit gate: the Go release is the supported default with complete current functionality and demonstrated performance/maintenance benefits.
 

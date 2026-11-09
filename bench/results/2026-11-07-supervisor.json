@@ -1,0 +1,26 @@
+{
+  "scope": "Go managed SSH supervisor; real loopback SSH; 30 same-pane reconnects",
+  "samples": 31,
+  "supervisor": {
+    "rss_kib": {
+      "min": 8312,
+      "max": 8940,
+      "last": 8572
+    },
+    "pss_kib": {
+      "min": 5092,
+      "max": 5720,
+      "last": 5352
+    },
+    "private_kib": {
+      "min": 1880,
+      "max": 2508,
+      "last": 2140
+    },
+    "fds": {
+      "min": 8,
+      "max": 8,
+      "last": 8
+    }
+  }
+}

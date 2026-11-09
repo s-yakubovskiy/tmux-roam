@@ -32,7 +32,7 @@ def main():
                 path.write_text(content)
             env = {**os.environ, "TMUX_ROAM_CONFIG": str(path)}
             codes = []
-            for exe in (ROOT / "bin/tmux-roam", ROOT / "build/tmux-roam-go"):
+            for exe in (ROOT / "bin/tmux-roam-python", ROOT / "build/tmux-roam-go"):
                 result = subprocess.run([str(exe), "config", "check"], env=env, capture_output=True)
                 codes.append(result.returncode)
             expected = 0 if name in ("missing", "valid") else 2

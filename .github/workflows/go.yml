@@ -3,7 +3,7 @@ on:
   push:
   pull_request:
 jobs:
-  read-only-slice:
+  runtime-and-release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -11,7 +11,25 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Install tmux
-        run: sudo apt-get update && sudo apt-get install -y tmux
-      - name: Check Go slice
+      - name: Install acceptance dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-server vim-tiny autoconf automake bison libevent-dev libncurses-dev pkg-config build-essential
+          # Match the supported local terminal contract; distro tmux can be older.
+          mkdir -p "$RUNNER_TEMP/roam-tmux"
+          curl -fsSL https://github.com/tmux/tmux/archive/72c20dc22c24c34b8e39506f524c9c88da2f48aa.tar.gz | tar -xz --strip-components=1 -C "$RUNNER_TEMP/roam-tmux"
+          cd "$RUNNER_TEMP/roam-tmux"
+          sh autogen.sh
+          ./configure --prefix="$HOME/.local"
+          make -j2
+          make install
+          GOBIN="$HOME/.local/bin" go install github.com/junegunn/fzf@v0.74.5
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Check runtime, terminal contracts, coexistence, and releases
         run: sh scripts/check-go.sh
+      - name: Fuzz configuration, identities, inventory and shell boundaries
+        run: sh scripts/fuzz-go.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-release-candidates
+          path: build/releases/

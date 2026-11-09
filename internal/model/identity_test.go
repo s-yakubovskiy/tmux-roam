@@ -37,3 +37,19 @@ func TestBadIdentity(t *testing.T) {
 		}
 	}
 }
+
+func FuzzIdentityDecode(f *testing.F) {
+	for _, value := range []string{"", "!!!", "bnVsbA", (Identity{"хост 👩‍💻", "/tmp/s", "12/34", "$1", 42}).Encode()} {
+		f.Add(value)
+	}
+	f.Fuzz(func(t *testing.T, value string) {
+		id, err := Decode(value)
+		if err != nil {
+			return
+		}
+		roundTrip, err := Decode(id.Encode())
+		if err != nil || roundTrip != id {
+			t.Fatalf("identity lost fields: %+v %+v %v", id, roundTrip, err)
+		}
+	})
+}

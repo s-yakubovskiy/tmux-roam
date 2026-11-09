@@ -12,10 +12,10 @@ commands = ("pick", "native", "native-select", "native-refresh", "popup",
             "open", "doctor", "integrate", "config", "supervise")
 result = {}
 for name in commands:
-    completed = subprocess.run([str(root / "bin/tmux-roam"), name, "--help"],
+    completed = subprocess.run([str(root / "bin/tmux-roam-python"), name, "--help"],
                                capture_output=True, text=True, env={**os.environ, "TMUX_ROAM_CONFIG": "/nonexistent/tmux-roam/config.toml"})
     result[name] = {"exit": completed.returncode, "stdout": completed.stdout, "stderr": completed.stderr}
-completed = subprocess.run([str(root / "bin/tmux-roam"), "--version"], capture_output=True, text=True)
+completed = subprocess.run([str(root / "bin/tmux-roam-python"), "--version"], capture_output=True, text=True)
 result["--version"] = {"exit": completed.returncode, "stdout": completed.stdout, "stderr": completed.stderr}
 path = root / "tests/fixtures/python_cli_help.json"
 path.parent.mkdir(parents=True, exist_ok=True)

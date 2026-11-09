@@ -1,0 +1,38 @@
+{
+  "platform": "Linux-6.17.0-1033-oem-x86_64-with-glibc2.39",
+  "load": [
+    2.4150390625,
+    2.2177734375,
+    1.97119140625
+  ],
+  "runs": 30,
+  "go": "go version go1.27.2 linux/amd64",
+  "build": "CGO_ENABLED=0 -trimpath -ldflags='-s -w'",
+  "scope": "process completion; no tmux, SSH or UI; first invocation is not a cold filesystem benchmark",
+  "results": {
+    "version": {
+      "Go": {
+        "first_ms": 5.1,
+        "p50_ms": 2.9,
+        "p95_ms": 4.17
+      },
+      "Python": {
+        "first_ms": 99.55,
+        "p50_ms": 106.33,
+        "p95_ms": 138.59
+      }
+    },
+    "config": {
+      "Go": {
+        "first_ms": 6.46,
+        "p50_ms": 3.25,
+        "p95_ms": 4.83
+      },
+      "Python": {
+        "first_ms": 137.89,
+        "p50_ms": 98.89,
+        "p95_ms": 130.39
+      }
+    }
+  }
+}

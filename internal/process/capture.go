@@ -31,6 +31,10 @@ func (b *limitedBuffer) Bytes() []byte { return b.buf.Bytes() }
 // Capture bounds both output streams and kills the entire child process group on
 // cancellation or timeout. Callers pass a deadline; no child survives a failed read.
 func Capture(parent context.Context, timeout time.Duration, limit int, argv ...string) (Result, error) {
+	return CaptureInput(parent, timeout, limit, nil, argv...)
+}
+
+func CaptureInput(parent context.Context, timeout time.Duration, limit int, input io.Reader, argv ...string) (Result, error) {
 	var result Result
 	if len(argv) == 0 {
 		return result, errors.New("empty command")
@@ -40,8 +44,14 @@ func Capture(parent context.Context, timeout time.Duration, limit int, argv ...s
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
-	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	// Also bound an internal stdin copier if a multiplex master retains the
+	// read end after the SSH client exits. Our captured output pipes are closed
+	// explicitly below, before Wait.
+	cmd.WaitDelay = 100 * time.Millisecond
+	cmd.Stdin = input
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	out, err := cmd.StdoutPipe()
 	if err != nil {
 		return result, err
@@ -67,16 +77,25 @@ func Capture(parent context.Context, timeout time.Duration, limit int, argv ...s
 			if r.err != nil && err == nil {
 				err = r.err
 				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				_ = out.Close()
+				_ = stderr.Close()
 			}
 		case <-deadline:
 			if err == nil {
 				err = ctx.Err()
 			}
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			// An SSH multiplex master can retain these descriptors outside the
+			// child's process group. Cancellation must not wait for its EOF.
+			_ = out.Close()
+			_ = stderr.Close()
 			deadline = nil
 		}
 	}
 	waitErr := cmd.Wait()
+	if err == nil && ctx.Err() != nil {
+		err = ctx.Err()
+	}
 	result.Stdout = stdoutBuffer.Bytes()
 	result.Stderr = stderrBuffer.Bytes()
 	if cmd.ProcessState != nil {
