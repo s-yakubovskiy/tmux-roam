@@ -108,7 +108,11 @@ def _managed_pane(session, identity, token):
             return None
         if pane["pane_dead"] == "0":
             process = Path("/proc", pane["pane_pid"], "cmdline").read_bytes().rstrip(b"\0").decode().split("\0")
-            if process[-4:] != args[-4:] or "tmux_roam.cli" not in process:
+            legacy_python = "tmux_roam.cli" in process
+            recorded_go = (_read_state(token).get("command") == parts[-1] and
+                           len(args) >= 5 and os.path.isabs(args[-5]) and
+                           os.path.realpath(process[0]) == os.path.realpath(args[-5]))
+            if process[-4:] != args[-4:] or not (legacy_python or recorded_go):
                 return None
     except (OSError, ValueError, IndexError):
         return None

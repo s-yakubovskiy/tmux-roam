@@ -11,7 +11,7 @@ from pathlib import Path
 from . import VERSION, config_sync, connection, integration, inventory, native, picker, tmux
 from .config import ConfigError, load
 
-BIN = str(Path(__file__).resolve().parent.parent / "bin" / "tmux-roam")
+BIN = str(Path(__file__).resolve().parent.parent / "bin" / "tmux-roam-python")
 
 
 def _client(value):

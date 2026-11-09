@@ -1,0 +1,50 @@
+name: Go migration checks
+on:
+  push:
+  pull_request:
+jobs:
+  runtime-and-release:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Record native platform
+        run: uname -srm
+      - name: Install acceptance dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-server vim-tiny zsh autoconf automake bison libevent-dev libncurses-dev pkg-config build-essential
+          # Match the supported local terminal contract; distro tmux can be older.
+          mkdir -p "$RUNNER_TEMP/roam-tmux"
+          curl -fsSL https://github.com/tmux/tmux/releases/download/3.8/tmux-3.8.tar.gz -o "$RUNNER_TEMP/tmux-3.8.tar.gz"
+          echo "e79c699c7e949dccd0a4a125e17b8d1261e311b16979dbc8eb34542f3966d82e  $RUNNER_TEMP/tmux-3.8.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/tmux-3.8.tar.gz" --strip-components=1 -C "$RUNNER_TEMP/roam-tmux"
+          cd "$RUNNER_TEMP/roam-tmux"
+          ./configure --prefix="$HOME/.local"
+          make -j2
+          make install
+          mkdir -p "$RUNNER_TEMP/roam-tmux-old"
+          curl -fsSL https://github.com/tmux/tmux/releases/download/3.6a/tmux-3.6a.tar.gz -o "$RUNNER_TEMP/tmux-3.6a.tar.gz"
+          echo "b6d8d9c76585db8ef5fa00d4931902fa4b8cbe8166f528f44fc403961a3f3759  $RUNNER_TEMP/tmux-3.6a.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/tmux-3.6a.tar.gz" --strip-components=1 -C "$RUNNER_TEMP/roam-tmux-old"
+          cd "$RUNNER_TEMP/roam-tmux-old"
+          ./configure
+          make -j2
+          echo "TMUX_ROAM_TEST_OLD_TMUX=$RUNNER_TEMP/roam-tmux-old/tmux" >> "$GITHUB_ENV"
+          GOBIN="$HOME/.local/bin" go install github.com/junegunn/fzf@v0.74.5
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Check runtime, terminal contracts, coexistence, and releases
+        run: sh scripts/check-go.sh
+      - name: Fuzz configuration, identities, inventory and shell boundaries
+        run: sh scripts/fuzz-go.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-release-candidates-${{ runner.arch }}
+          path: build/releases/

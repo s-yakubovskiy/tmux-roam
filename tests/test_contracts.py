@@ -1025,6 +1025,7 @@ class IsolatedTmuxContracts(unittest.TestCase):
         self.assertEqual(connection._owned_sessions(), [(sid, record.id)])
 
     def test_native_compact_rows_current_session_and_refresh_preserve_selection(self):
+        tmux.run(["set-option", "-as", "terminal-features", ",xterm-256color:RGB"])
         tmux.run(["respawn-pane", "-k", "-t", "start", "sleep 60"])
         tmux.run(["rename-session", "-t", "start", "🐱dev"])
         tmux.run(["set-option", "-gw", "mode-keys", "vi"])

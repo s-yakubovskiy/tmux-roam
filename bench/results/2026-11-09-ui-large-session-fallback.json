@@ -1,0 +1,149 @@
+{
+  "platform": "Linux-6.17.0-1033-oem-x86_64-with-glibc2.39",
+  "load": [
+    2.97412109375,
+    2.47314453125,
+    2.0791015625
+  ],
+  "runs": 50,
+  "remote_sessions": 500,
+  "controller_sha256": "bc38bc5d8d9b6dc754c74901b2434e1e8cbb502ddf5d1802cb5ca1e51d5d78f1",
+  "tmux": "tmux 3.8",
+  "fzf": "0.74.5 (c0a193e0)",
+  "build": "CGO_ENABLED=0 -trimpath -ldflags='-s -w'",
+  "screen_parser": "pyte 0.8.2 / wcwidth 0.2.13",
+  "native_scope": "fully hydrated dormant entries; 0 expected window mirrors (2500 requested)",
+  "scrollback_lines": 20000,
+  "terminal": "110x32 xterm-256color PTY with DA/colour/size replies; tmux escape-time 10 ms (workstation setting)",
+  "scope": "actual rendered rows/prompt/footer; cached scripted SSH then hung refresh; Go first key immediately after frame; Python steady typing after 200 ms; polling upper bounds",
+  "results": {
+    "Go": {
+      "first_manager_ms": 106.57,
+      "first_manager_usable_ms": 113.52,
+      "first_search_ms": 196.23,
+      "first_search_usable_ms": 200.96,
+      "manager_open": {
+        "samples": 50,
+        "p50_ms": 117.14,
+        "p95_ms": 132.18
+      },
+      "search_open": {
+        "samples": 50,
+        "p50_ms": 145.33,
+        "p95_ms": 198.16
+      },
+      "typing": {
+        "samples": 900,
+        "p50_ms": 5.09,
+        "p95_ms": 9.66
+      },
+      "fzf_escape": {
+        "samples": 100,
+        "p50_ms": 22.5,
+        "p95_ms": 24.28
+      },
+      "escape_visible": {
+        "samples": 100,
+        "p50_ms": 46.9,
+        "p95_ms": 100.1
+      },
+      "cancel_join": {
+        "samples": 100,
+        "p50_ms": 74.65,
+        "p95_ms": 132.93
+      },
+      "local_selection": {
+        "samples": 50,
+        "p50_ms": 69.6,
+        "p95_ms": 77.71
+      },
+      "manager_usable": {
+        "samples": 50,
+        "p50_ms": 126.83,
+        "p95_ms": 143.47
+      },
+      "search_usable": {
+        "samples": 50,
+        "p50_ms": 154.69,
+        "p95_ms": 208.3
+      },
+      "first_key": {
+        "samples": 100,
+        "p50_ms": 6.08,
+        "p95_ms": 10.55
+      }
+    },
+    "Python": {
+      "first_manager_ms": 375.27,
+      "first_search_ms": 387.97,
+      "manager_open": {
+        "samples": 50,
+        "p50_ms": 352.8,
+        "p95_ms": 391.03
+      },
+      "search_open": {
+        "samples": 50,
+        "p50_ms": 406.23,
+        "p95_ms": 451.7
+      },
+      "typing": {
+        "samples": 900,
+        "p50_ms": 5.94,
+        "p95_ms": 12.13
+      },
+      "fzf_escape": {
+        "samples": 100,
+        "p50_ms": 117.12,
+        "p95_ms": 119.94
+      },
+      "escape_visible": {
+        "samples": 100,
+        "p50_ms": 153.62,
+        "p95_ms": 199.47
+      },
+      "cancel_join": {
+        "samples": 100,
+        "p50_ms": 274.35,
+        "p95_ms": 313.21
+      },
+      "local_selection": {
+        "samples": 50,
+        "p50_ms": 298.46,
+        "p95_ms": 328.38
+      }
+    }
+  },
+  "escape_time": "10",
+  "mirror_limit_diagnostic": "doctor confirms session fallback above 100 remote windows",
+  "native_hydration_seconds": 115.18,
+  "hydrated_remote_entries": 500,
+  "hydrated_window_mirrors": 0,
+  "server_job_settle_ms": 0.1,
+  "server_fds": {
+    "before": 10,
+    "immediate": 10,
+    "after": 10
+  },
+  "native": {
+    "open": {
+      "samples": 50,
+      "p50_ms": 133.73,
+      "p95_ms": 163.05
+    },
+    "local_selection": {
+      "samples": 50,
+      "p50_ms": 30.32,
+      "p95_ms": 102.97
+    }
+  },
+  "gates": {
+    "manager_frame": true,
+    "search_frame": true,
+    "typing": true,
+    "local_selection": false,
+    "visible_close": false,
+    "cancel_join": true,
+    "native_open": false,
+    "native_local_selection": false
+  }
+}

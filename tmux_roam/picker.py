@@ -675,7 +675,7 @@ def pick(config, client, *, search=False, popup=None, pane=None):
         worker = threading.Thread(target=refresh, daemon=True)
         worker.start()
         env = _fzf_env()
-        binary = str(Path(__file__).resolve().parent.parent / "bin" / "tmux-roam")
+        binary = str(Path(__file__).resolve().parent.parent / "bin" / "tmux-roam-python")
         base = binary + " picker-state " + str(root)
         created = "+transform(test -f " + str(root / "created.json") + " && printf accept)"
         command = ["fzf", "--sync", "--read0", "--print0", "--delimiter=\t", "--with-nth=2..", "--id-nth=1",

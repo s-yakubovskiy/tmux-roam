@@ -1,0 +1,34 @@
+{
+  "date": "2026-11-09",
+  "controller_sha256": "bc38bc5d8d9b6dc754c74901b2434e1e8cbb502ddf5d1802cb5ca1e51d5d78f1",
+  "user_scope_choice": "Defer large mirrors and review a timing exception",
+  "implemented_mirror_limit": 100,
+  "scope": "per host, total remote window mirrors; session entries and real remote counts remain",
+  "proposed_native_open_p95_ms": 25,
+  "original_native_open_p95_ms": 20,
+  "exception_status": "open, not accepted: recorded battery repeat measured 44.95 ms and also missed unchanged fuzzy medians",
+  "other_budgets_changed": false,
+  "battery_observation": {
+    "ac_online": false,
+    "cpu_energy_preference": "balance_power",
+    "profile": "balanced",
+    "source": "Read-only probe after the normal workload, during the 500-session fallback workload; earlier benchmark power states unknown"
+  },
+  "user_power_reply": "Cannot connect AC now",
+  "reference_power_repeat": "AC comparison deferred until available; a 50-trial battery repeat recorded power at both ends; power is still a hypothesis, not an established cause",
+  "production_activated": false,
+  "recorded_battery_repeat": {
+    "report": "2026-11-09-ui-normal-battery-recorded.json",
+    "runs": 50,
+    "starting_load_1m": 0.68505859375,
+    "manager_open_p50_ms": 69.76,
+    "search_open_p50_ms": 64.68,
+    "native_open_p95_ms": 44.95,
+    "ac_online_start": false,
+    "ac_online_end": false,
+    "cpu_energy_preference_start": "balance_power",
+    "cpu_energy_preference_end": "balance_power",
+    "other_input_selection_close_cancellation_resource_gates": "pass",
+    "interpretation": "Lower starting load did not resolve the normal opening misses. No AC comparison or timing waiver is claimed."
+  }
+}

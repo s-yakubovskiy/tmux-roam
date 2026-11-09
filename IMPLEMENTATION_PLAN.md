@@ -1,5 +1,7 @@
 # tmux-roam implementation plan
 
+Historical Python implementation plan. Its checkpoints and early scope below are retained for context; use [README.md](README.md) for current behavior and [GO_MIGRATION_PLAN.md](GO_MIGRATION_PLAN.md) for the planned Go migration and stage acceptance gates.
+
 Status: implementation in progress. Core plugin and isolated local/SSH tests are implemented. Workstation rollout is at the spare `F9` binding; `home.omni` authentication and user physical-key acceptance are pending. Working name: **tmux-roam**.
 
 Implementation checkpoint (2026-10-31): version 0.1.0 is in this checkout. Isolated tests covered local tmux 3.7c, remote tmux 3.6/3.7c, exact attachment and reuse, concurrent creation, prefix routing, remote session changes, disconnect/retry, deletion and server restart. The 3.8 local matrix, sustained full-screen application testing, performance budgets and the final workstation key flow remain to be verified. Do not mark the definition of done complete until those gates pass.

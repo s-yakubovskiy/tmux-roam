@@ -1,0 +1,107 @@
+{
+  "pick": {
+    "exit": 0,
+    "stdout": "usage: tmux-roam pick [-h] [--client CLIENT] [--search] [--pane PANE]\n\noptions:\n  -h, --help       show this help message and exit\n  --client CLIENT\n  --search\n  --pane PANE\n",
+    "stderr": ""
+  },
+  "native": {
+    "exit": 0,
+    "stdout": "usage: tmux-roam native [-h] [--client CLIENT]\n\noptions:\n  -h, --help       show this help message and exit\n  --client CLIENT\n",
+    "stderr": ""
+  },
+  "native-select": {
+    "exit": 0,
+    "stdout": "usage: tmux-roam native-select [-h] --client CLIENT --navigation NAVIGATION\n                               --target TARGET\n\noptions:\n  -h, --help            show this help message and exit\n  --client CLIENT\n  --navigation NAVIGATION\n  --target TARGET\n",
+    "stderr": ""
+  },
+  "native-refresh": {
+    "exit": 0,
+    "stdout": "usage: tmux-roam native-refresh [-h] --client CLIENT --navigation NAVIGATION\n                                --pane PANE\n\noptions:\n  -h, --help            show this help message and exit\n  --client CLIENT\n  --navigation NAVIGATION\n  --pane PANE\n",
+    "stderr": ""
+  },
+  "popup": {
+    "exit": 0,
+    "stdout": "usage: tmux-roam popup [-h] --client CLIENT [--search] [--pane PANE]\n\noptions:\n  -h, --help       show this help message and exit\n  --client CLIENT\n  --search\n  --pane PANE\n",
+    "stderr": ""
+  },
+  "picker-state": {
+    "exit": 0,
+    "stdout": "usage: tmux-roam picker-state [-h] directory {filter,hidden,refresh}\n\npositional arguments:\n  directory\n  {filter,hidden,refresh}\n\noptions:\n  -h, --help            show this help message and exit\n",
+    "stderr": ""
+  },
+  "picker-header": {
+    "exit": 0,
+    "stdout": "usage: tmux-roam picker-header [-h] directory\n\npositional arguments:\n  directory\n\noptions:\n  -h, --help  show this help message and exit\n",
+    "stderr": ""
+  },
+  "picker-select": {
+    "exit": 0,
+    "stdout": "usage: tmux-roam picker-select [-h] directory opaque_id\n\npositional arguments:\n  directory\n  opaque_id\n\noptions:\n  -h, --help  show this help message and exit\n",
+    "stderr": ""
+  },
+  "details": {
+    "exit": 0,
+    "stdout": "usage: tmux-roam details [-h] directory opaque_id\n\npositional arguments:\n  directory\n  opaque_id\n\noptions:\n  -h, --help  show this help message and exit\n",
+    "stderr": ""
+  },
+  "help": {
+    "exit": 0,
+    "stdout": "usage: tmux-roam help [-h]\n\noptions:\n  -h, --help  show this help message and exit\n",
+    "stderr": ""
+  },
+  "actions": {
+    "exit": 0,
+    "stdout": "usage: tmux-roam actions [-h] directory opaque_id\n\npositional arguments:\n  directory\n  opaque_id\n\noptions:\n  -h, --help  show this help message and exit\n",
+    "stderr": ""
+  },
+  "new-session": {
+    "exit": 0,
+    "stdout": "usage: tmux-roam new-session [-h] directory [opaque_id]\n\npositional arguments:\n  directory\n  opaque_id\n\noptions:\n  -h, --help  show this help message and exit\n",
+    "stderr": ""
+  },
+  "delete-session": {
+    "exit": 0,
+    "stdout": "usage: tmux-roam delete-session [-h] directory opaque_id\n\npositional arguments:\n  directory\n  opaque_id\n\noptions:\n  -h, --help  show this help message and exit\n",
+    "stderr": ""
+  },
+  "list": {
+    "exit": 0,
+    "stdout": "usage: tmux-roam list [-h] [--json] [--cached]\n\noptions:\n  -h, --help  show this help message and exit\n  --json\n  --cached\n",
+    "stderr": ""
+  },
+  "refresh": {
+    "exit": 0,
+    "stdout": "usage: tmux-roam refresh [-h] [host_id]\n\npositional arguments:\n  host_id\n\noptions:\n  -h, --help  show this help message and exit\n",
+    "stderr": ""
+  },
+  "open": {
+    "exit": 0,
+    "stdout": "usage: tmux-roam open [-h] [--client CLIENT] opaque_id\n\npositional arguments:\n  opaque_id\n\noptions:\n  -h, --help       show this help message and exit\n  --client CLIENT\n",
+    "stderr": ""
+  },
+  "doctor": {
+    "exit": 0,
+    "stdout": "usage: tmux-roam doctor [-h]\n\noptions:\n  -h, --help  show this help message and exit\n",
+    "stderr": ""
+  },
+  "integrate": {
+    "exit": 0,
+    "stdout": "usage: tmux-roam integrate [-h] {install,unload}\n\npositional arguments:\n  {install,unload}\n\noptions:\n  -h, --help        show this help message and exit\n",
+    "stderr": ""
+  },
+  "config": {
+    "exit": 0,
+    "stdout": "usage: tmux-roam config [-h] [--source SOURCE]\n                        {check,diff,sync} [--all | host_id]\n\npositional arguments:\n  {check,diff,sync}\n  host_id\n\noptions:\n  -h, --help         show this help message and exit\n  --all\n  --source SOURCE    shared tmux config (default: ~/.tmux.conf)\n",
+    "stderr": ""
+  },
+  "supervise": {
+    "exit": 0,
+    "stdout": "usage: tmux-roam supervise [-h] token host_id opaque_id\n\npositional arguments:\n  token\n  host_id\n  opaque_id\n\noptions:\n  -h, --help  show this help message and exit\n",
+    "stderr": ""
+  },
+  "--version": {
+    "exit": 0,
+    "stdout": "0.1.0\n",
+    "stderr": ""
+  }
+}

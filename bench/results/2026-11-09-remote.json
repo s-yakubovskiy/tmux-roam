@@ -1,0 +1,215 @@
+{
+  "platform": "Linux-6.17.0-1033-oem-x86_64-with-glibc2.39",
+  "load": [
+    5.517578125,
+    4.97412109375,
+    3.72119140625
+  ],
+  "tmux": "tmux 3.8",
+  "controller_sha256": "e606edef8b2dd57dbd55487a373f72625dc3541e88e6ad5a7ecdbc81ba1c5adc",
+  "scope": "real loopback OpenSSH and tmux; warm reuse and warm/cold transport new attachments; added delay per remote tmux command, not WAN latency; SSH durations include transport and remote execution; no terminal contents logged",
+  "scenarios": {
+    "0ms added remote delay": {
+      "total": {
+        "samples": 30,
+        "p50_ms": 76.01,
+        "p95_ms": 90.2
+      },
+      "ssh_child": {
+        "samples": 30,
+        "p50_ms": 42.37,
+        "p95_ms": 50.22
+      },
+      "local_orchestration": {
+        "samples": 30,
+        "p50_ms": 33.13,
+        "p95_ms": 43.9
+      },
+      "ssh_requests_per_reuse": 1
+    },
+    "25ms added remote delay": {
+      "total": {
+        "samples": 30,
+        "p50_ms": 180.88,
+        "p95_ms": 186.45
+      },
+      "ssh_child": {
+        "samples": 30,
+        "p50_ms": 145.97,
+        "p95_ms": 148.96
+      },
+      "local_orchestration": {
+        "samples": 30,
+        "p50_ms": 35.41,
+        "p95_ms": 38.43
+      },
+      "ssh_requests_per_reuse": 1
+    },
+    "100ms added remote delay": {
+      "total": {
+        "samples": 30,
+        "p50_ms": 483.23,
+        "p95_ms": 491.83
+      },
+      "ssh_child": {
+        "samples": 30,
+        "p50_ms": 446.08,
+        "p95_ms": 449.79
+      },
+      "local_orchestration": {
+        "samples": 30,
+        "p50_ms": 37.44,
+        "p95_ms": 43.46
+      },
+      "ssh_requests_per_reuse": 1
+    }
+  },
+  "new_connection": {
+    "0ms added remote delay": {
+      "total": {
+        "samples": 30,
+        "p50_ms": 242.92,
+        "p95_ms": 254.49
+      },
+      "preflight_ssh": {
+        "samples": 30,
+        "p50_ms": 84.2,
+        "p95_ms": 90.57
+      },
+      "attach_to_first_handshake_byte": {
+        "samples": 30,
+        "p50_ms": 15.04,
+        "p95_ms": 18.44
+      },
+      "handshake_to_confirmed_switch": {
+        "samples": 30,
+        "p50_ms": 83.59,
+        "p95_ms": 91.28
+      },
+      "confirmation_ssh": {
+        "samples": 30,
+        "p50_ms": 41.64,
+        "p95_ms": 46.58
+      },
+      "outside_ssh": {
+        "samples": 30,
+        "p50_ms": 103.39,
+        "p95_ms": 111.65
+      },
+      "ssh_requests_min_max": [
+        4,
+        4
+      ]
+    },
+    "25ms added remote delay": {
+      "total": {
+        "samples": 30,
+        "p50_ms": 542.01,
+        "p95_ms": 586.93
+      },
+      "preflight_ssh": {
+        "samples": 30,
+        "p50_ms": 287.97,
+        "p95_ms": 300.53
+      },
+      "attach_to_first_handshake_byte": {
+        "samples": 30,
+        "p50_ms": 15.86,
+        "p95_ms": 21.75
+      },
+      "handshake_to_confirmed_switch": {
+        "samples": 30,
+        "p50_ms": 170.08,
+        "p95_ms": 206.07
+      },
+      "confirmation_ssh": {
+        "samples": 30,
+        "p50_ms": 144.45,
+        "p95_ms": 150.38
+      },
+      "outside_ssh": {
+        "samples": 30,
+        "p50_ms": 90.28,
+        "p95_ms": 123.46
+      },
+      "ssh_requests_min_max": [
+        4,
+        4
+      ]
+    },
+    "100ms added remote delay": {
+      "total": {
+        "samples": 30,
+        "p50_ms": 1457.34,
+        "p95_ms": 1475.96
+      },
+      "preflight_ssh": {
+        "samples": 30,
+        "p50_ms": 893.26,
+        "p95_ms": 902.57
+      },
+      "attach_to_first_handshake_byte": {
+        "samples": 30,
+        "p50_ms": 16.76,
+        "p95_ms": 19.73
+      },
+      "handshake_to_confirmed_switch": {
+        "samples": 30,
+        "p50_ms": 482.56,
+        "p95_ms": 492.43
+      },
+      "confirmation_ssh": {
+        "samples": 30,
+        "p50_ms": 445.54,
+        "p95_ms": 449.99
+      },
+      "outside_ssh": {
+        "samples": 30,
+        "p50_ms": 102.75,
+        "p95_ms": 118.45
+      },
+      "ssh_requests_min_max": [
+        4,
+        4
+      ]
+    }
+  },
+  "cold_transport_new_connection": {
+    "0ms added remote delay": {
+      "total": {
+        "samples": 30,
+        "p50_ms": 480.75,
+        "p95_ms": 508.61
+      },
+      "preflight_ssh": {
+        "samples": 30,
+        "p50_ms": 320.86,
+        "p95_ms": 345.69
+      },
+      "attach_to_first_handshake_byte": {
+        "samples": 30,
+        "p50_ms": 15.78,
+        "p95_ms": 19.7
+      },
+      "handshake_to_confirmed_switch": {
+        "samples": 30,
+        "p50_ms": 81.06,
+        "p95_ms": 88.93
+      },
+      "confirmation_ssh": {
+        "samples": 30,
+        "p50_ms": 42.21,
+        "p95_ms": 45.58
+      },
+      "outside_ssh": {
+        "samples": 30,
+        "p50_ms": 103.28,
+        "p95_ms": 111.18
+      },
+      "ssh_requests_min_max": [
+        4,
+        4
+      ]
+    }
+  }
+}

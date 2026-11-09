@@ -1,0 +1,143 @@
+{
+  "controller_sha256": "e606edef8b2dd57dbd55487a373f72625dc3541e88e6ad5a7ecdbc81ba1c5adc",
+  "platform": "Linux-6.17.0-1033-oem-x86_64-with-glibc2.39",
+  "cpu": "x86_64",
+  "load": [
+    4.82421875,
+    5.24365234375,
+    4.0927734375
+  ],
+  "tmux": "tmux 3.8",
+  "go": "go version go1.27.2 linux/amd64",
+  "build": "CGO_ENABLED=0 -trimpath -ldflags='-s -w'",
+  "runs": 30,
+  "scope": "CLI JSON completion; 1 local session; scripted SSH, no network/remote cost; no UI",
+  "scenarios": {
+    "0 sessions/0 windows; live": {
+      "Go": {
+        "p50_ms": 23.62,
+        "p95_ms": 26.98,
+        "process_counts": {
+          "tmux": 2,
+          "ssh": 1
+        }
+      },
+      "Python": {
+        "p50_ms": 132.56,
+        "p95_ms": 172.77,
+        "process_counts": {
+          "tmux": 4,
+          "ssh": 1
+        }
+      }
+    },
+    "0 sessions/0 windows; cached": {
+      "Go": {
+        "p50_ms": 11.19,
+        "p95_ms": 14.96,
+        "process_counts": {
+          "tmux": 1,
+          "ssh": 0
+        }
+      },
+      "Python": {
+        "p50_ms": 125.82,
+        "p95_ms": 163.12,
+        "process_counts": {
+          "tmux": 3,
+          "ssh": 0
+        }
+      }
+    },
+    "20 sessions/100 windows; live": {
+      "Go": {
+        "p50_ms": 25.06,
+        "p95_ms": 28.08,
+        "process_counts": {
+          "tmux": 2,
+          "ssh": 1
+        }
+      },
+      "Python": {
+        "p50_ms": 135.43,
+        "p95_ms": 176.09,
+        "process_counts": {
+          "tmux": 4,
+          "ssh": 1
+        }
+      }
+    },
+    "20 sessions/100 windows; cached": {
+      "Go": {
+        "p50_ms": 11.7,
+        "p95_ms": 14.15,
+        "process_counts": {
+          "tmux": 1,
+          "ssh": 0
+        }
+      },
+      "Python": {
+        "p50_ms": 128.27,
+        "p95_ms": 155.66,
+        "process_counts": {
+          "tmux": 3,
+          "ssh": 0
+        }
+      }
+    },
+    "500 sessions/2500 windows; live": {
+      "Go": {
+        "p50_ms": 58.1,
+        "p95_ms": 63.33,
+        "process_counts": {
+          "tmux": 2,
+          "ssh": 1
+        }
+      },
+      "Python": {
+        "p50_ms": 198.27,
+        "p95_ms": 231.77,
+        "process_counts": {
+          "tmux": 4,
+          "ssh": 1
+        }
+      }
+    },
+    "500 sessions/2500 windows; cached": {
+      "Go": {
+        "p50_ms": 34.58,
+        "p95_ms": 38.66,
+        "process_counts": {
+          "tmux": 1,
+          "ssh": 0
+        }
+      },
+      "Python": {
+        "p50_ms": 156.28,
+        "p95_ms": 189.52,
+        "process_counts": {
+          "tmux": 3,
+          "ssh": 0
+        }
+      }
+    },
+    "20 sessions/100 windows; live; one 25ms failing host": {
+      "Go": {
+        "p50_ms": 42.98,
+        "p95_ms": 46.35,
+        "process_counts": {
+          "tmux": 2,
+          "ssh": 2
+        }
+      },
+      "Python": {
+        "p50_ms": 157.7,
+        "p95_ms": 193.42,
+        "process_counts": {
+          "tmux": 4,
+          "ssh": 2
+        }
+      }
+    }
+  }
+}

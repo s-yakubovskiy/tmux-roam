@@ -1,0 +1,29 @@
+{
+  "platform": "Linux-6.17.0-1033-oem-x86_64-with-glibc2.39",
+  "load": [
+    2.4501953125,
+    2.42919921875,
+    2.34375
+  ],
+  "runs": 50,
+  "remote_sessions": 500,
+  "controller_sha256": "16ed1fe5e088f168afe15938706154ebd7c6f44e3c3d6aba89fb5945d0d13879",
+  "tmux": "tmux 3.8",
+  "fzf": "0.74.5 (c0a193e0)",
+  "build": "CGO_ENABLED=0 -trimpath -ldflags='-s -w'",
+  "screen_parser": "pyte 0.8.2 / wcwidth 0.2.13",
+  "native_scope": "fully hydrated dormant entries and five window mirrors per remote session",
+  "scrollback_lines": 20000,
+  "terminal": "110x32 xterm-256color PTY with DA/colour/size replies; tmux escape-time 10 ms (workstation setting)",
+  "scope": "actual rendered rows/prompt/footer; cached scripted SSH then hung refresh; Go first key immediately after frame; Python steady typing after 200 ms; polling upper bounds",
+  "results": {},
+  "escape_time": "10",
+  "failure": {
+    "trial": -1,
+    "backend": "setup",
+    "search": false,
+    "error": "native hydration timed out"
+  },
+  "native_hydration_seconds": 600.19,
+  "hydrated_window_mirrors": 1435
+}

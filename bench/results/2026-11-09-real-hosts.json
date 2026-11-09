@@ -1,0 +1,142 @@
+{
+  "recorded_at_utc": "2026-11-09T11:22:19Z",
+  "controller_sha256": "bc38bc5d8d9b6dc754c74901b2434e1e8cbb502ddf5d1802cb5ca1e51d5d78f1",
+  "scope": "Private remote HOME/state/TMPDIR/socket and private local tmux server; generated client checks, not physical acceptance or production activation",
+  "runs": [
+    {
+      "command": "python3 tests/acceptance/real_hosts.py --command-timeout 30 omni devdocker",
+      "exit_code": 1,
+      "host": "omni",
+      "result": "blocked",
+      "stage": "Initial SSH authentication, before private fixture creation; DevDocker was not reached",
+      "error": "Permission denied (publickey)",
+      "controller_sha256": "e606edef8b2dd57dbd55487a373f72625dc3541e88e6ad5a7ecdbc81ba1c5adc"
+    },
+    {
+      "command": "python3 tests/acceptance/real_hosts.py devdocker",
+      "exit_code": 0,
+      "host": "devdocker",
+      "result": "passed",
+      "command_timeout_seconds": 5,
+      "config_sync_seconds": 0.52,
+      "checks": [
+        "Exact attachment and reuse",
+        "Reconnect keeps the original pane",
+        "Isolated config sync and diff",
+        "Integration unload",
+        "Existing default-server session identities preserved",
+        "Private fixture cleanup"
+      ],
+      "controller_sha256": "e606edef8b2dd57dbd55487a373f72625dc3541e88e6ad5a7ecdbc81ba1c5adc"
+    },
+    {
+      "command": "ssh -o BatchMode=yes -o ConnectTimeout=3 home.omni true",
+      "exit_code": 255,
+      "host": "omni",
+      "result": "blocked",
+      "error": "Permission denied (publickey)",
+      "controller_sha256": "e606edef8b2dd57dbd55487a373f72625dc3541e88e6ad5a7ecdbc81ba1c5adc"
+    },
+    {
+      "command": "python3 tests/acceptance/real_hosts.py omni",
+      "exit_code": 0,
+      "host": "omni",
+      "result": "passed",
+      "command_timeout_seconds": 5,
+      "config_sync_seconds": 1.77,
+      "checks": [
+        "Exact attachment and reuse",
+        "Reconnect keeps the original pane",
+        "Isolated config sync and diff",
+        "Integration unload",
+        "Existing default-server session identities preserved",
+        "Private fixture cleanup"
+      ],
+      "note": "After the user restored SSH access; default fixture timeout",
+      "controller_sha256": "e606edef8b2dd57dbd55487a373f72625dc3541e88e6ad5a7ecdbc81ba1c5adc"
+    },
+    {
+      "command": "python3 tests/acceptance/real_hosts.py omni",
+      "controller_sha256": "70ac4dc99d9581366b987a964fb628b902519c05cad4ba30e4cc7ed34e731571",
+      "exit_code": 0,
+      "host": "omni",
+      "result": "passed",
+      "command_timeout_seconds": 5,
+      "config_sync_seconds": 1.43,
+      "checks": [
+        "Exact attachment and reuse",
+        "Reconnect keeps the original pane",
+        "Isolated config sync and diff",
+        "Integration unload",
+        "Existing default-server session identities preserved",
+        "Private fixture cleanup"
+      ],
+      "note": "After running-local-server compatibility guard; production unchanged"
+    },
+    {
+      "command": "python3 tests/acceptance/real_hosts.py devdocker",
+      "controller_sha256": "70ac4dc99d9581366b987a964fb628b902519c05cad4ba30e4cc7ed34e731571",
+      "exit_code": 0,
+      "host": "devdocker",
+      "result": "passed",
+      "command_timeout_seconds": 5,
+      "config_sync_seconds": 0.15,
+      "checks": [
+        "Exact attachment and reuse",
+        "Reconnect keeps the original pane",
+        "Isolated config sync and diff",
+        "Integration unload",
+        "Existing default-server session identities preserved",
+        "Private fixture cleanup"
+      ],
+      "note": "After running-local-server compatibility guard; production unchanged"
+    },
+    {
+      "command": "python3 tests/acceptance/real_hosts.py omni",
+      "controller_sha256": "bc38bc5d8d9b6dc754c74901b2434e1e8cbb502ddf5d1802cb5ca1e51d5d78f1",
+      "exit_code": 0,
+      "host": "omni",
+      "result": "passed",
+      "command_timeout_seconds": 5,
+      "config_sync_seconds": 1.66,
+      "checks": [
+        "Exact attachment and reuse",
+        "Reconnect keeps the original pane",
+        "Isolated config sync and diff",
+        "Integration unload",
+        "Existing default-server session identities preserved",
+        "Private fixture cleanup"
+      ],
+      "note": "After explicit 100-window native mirror limit; production unchanged"
+    },
+    {
+      "command": "python3 tests/acceptance/real_hosts.py devdocker",
+      "controller_sha256": "bc38bc5d8d9b6dc754c74901b2434e1e8cbb502ddf5d1802cb5ca1e51d5d78f1",
+      "exit_code": 0,
+      "host": "devdocker",
+      "result": "passed",
+      "command_timeout_seconds": 5,
+      "config_sync_seconds": 0.32,
+      "checks": [
+        "Exact attachment and reuse",
+        "Reconnect keeps the original pane",
+        "Isolated config sync and diff",
+        "Integration unload",
+        "Existing default-server session identities preserved",
+        "Private fixture cleanup"
+      ],
+      "note": "After explicit 100-window native mirror limit; production unchanged"
+    }
+  ],
+  "physical_acceptance": "Tentative positive Omni feedback; individual scenarios and canary completion unconfirmed",
+  "production_tpm_clone": "unchanged",
+  "updated_at_utc": "2026-11-09T13:07:14.940592+00:00",
+  "physical_feedback": {
+    "host": "omni",
+    "source": "User reply to the physical acceptance checklist",
+    "verbatim": "I am not sure, seems good.",
+    "status": "tentative",
+    "individual_checks_confirmed": false,
+    "canary_completion_confirmed": false
+  }
+}

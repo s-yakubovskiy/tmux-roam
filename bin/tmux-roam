@@ -1,6 +1,16 @@
 #!/bin/sh
+set -eu
 TMUX_ROAM_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-TMUX_ROAM_PYTHON=${TMUX_ROAM_PYTHON:-/usr/bin/python3}
-PYTHONPATH="$TMUX_ROAM_ROOT${PYTHONPATH:+:$PYTHONPATH}"
-export PYTHONPATH
-exec "$TMUX_ROAM_PYTHON" -P -m tmux_roam.cli "$@"
+case "${TMUX_ROAM_BACKEND:-go}" in
+    python) exec "$TMUX_ROAM_ROOT/bin/tmux-roam-python" "$@" ;;
+    go) ;;
+    *) printf '%s\n' 'tmux-roam: TMUX_ROAM_BACKEND must be go or python' >&2; exit 2 ;;
+esac
+if [ -x "$TMUX_ROAM_ROOT/.runtime/current/tmux-roam" ]; then
+    exec "$TMUX_ROAM_ROOT/.runtime/current/tmux-roam" "$@"
+fi
+if [ -x "$TMUX_ROAM_ROOT/build/tmux-roam-go" ]; then
+    exec "$TMUX_ROAM_ROOT/build/tmux-roam-go" "$@"
+fi
+printf '%s\n' 'tmux-roam: no Go bundle installed. Run scripts/install-go.sh BUNDLE SHA256, or build explicitly with scripts/build-go.sh. Use TMUX_ROAM_BACKEND=python for rollback.' >&2
+exit 2
